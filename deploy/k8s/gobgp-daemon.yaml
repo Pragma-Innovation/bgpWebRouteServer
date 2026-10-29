@@ -1,0 +1,73 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gobgp
+  namespace: bgpweb
+  labels:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: bgp-daemon
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: bgpweb
+      app.kubernetes.io/component: bgp-daemon
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: bgpweb
+        app.kubernetes.io/component: bgp-daemon
+    spec:
+      hostNetwork: true
+      dnsPolicy: ClusterFirstWithHostNet
+      terminationGracePeriodSeconds: 45
+      containers:
+        - name: gobgp
+          image: bgpweb-gobgp:latest
+          imagePullPolicy: IfNotPresent
+          command: ["gobgpd"]
+          args:
+            - "-f"
+            - "/etc/gobgp/gobgp.yaml"
+            - "--api-hosts"
+            - ":50051"
+          ports:
+            - name: bgp
+              containerPort: 179
+              hostPort: 179
+              protocol: TCP
+            - name: grpc
+              containerPort: 50051
+              hostPort: 50051
+              protocol: TCP
+          volumeMounts:
+            - name: gobgp-config
+              mountPath: /etc/gobgp/gobgp.yaml
+              subPath: gobgp.yaml
+              readOnly: true
+          resources:
+            requests:
+              cpu: 100m
+              memory: 128Mi
+            limits:
+              cpu: 500m
+              memory: 256Mi
+          livenessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 2
+          readinessProbe:
+            tcpSocket:
+              port: 50051
+            initialDelaySeconds: 5
+            periodSeconds: 5
+            timeoutSeconds: 2
+      volumes:
+        - name: gobgp-config
+          configMap:
+            name: bgpweb-config
+            items:
+              - key: gobgp.yaml
+                path: gobgp.yaml

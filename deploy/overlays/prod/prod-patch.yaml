@@ -1,0 +1,41 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: backend
+  namespace: bgpweb
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: frontend
+  namespace: bgpweb
+spec:
+  replicas: 3
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gobgp
+  namespace: bgpweb
+spec:
+  template:
+    spec:
+      tolerations:
+        - key: "router-node"
+          operator: "Exists"
+          effect: "NoSchedule"
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: bgpweb-ingress
+  namespace: bgpweb
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+spec:
+  tls:
+    - hosts:
+        - bgpweb.example.com
+      secretName: bgpweb-tls

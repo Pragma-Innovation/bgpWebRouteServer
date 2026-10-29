@@ -1,0 +1,7 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: bgpweb
+  labels:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/part-of: bgpWebRouteServer

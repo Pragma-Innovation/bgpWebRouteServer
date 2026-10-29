@@ -1,0 +1,9 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: bgpweb-config
+  namespace: bgpweb
+data:
+  DJANGO_DEBUG: "True"
+  BGP_MOCK_MODE: "True"
+  BGP_ENGINE_BACKEND: "apps.bgp_engine.backends.mock.MockBgpBackend"

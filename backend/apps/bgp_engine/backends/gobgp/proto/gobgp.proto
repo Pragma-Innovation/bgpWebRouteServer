@@ -1,0 +1,353 @@
+// Copyright (C) 2015-2024 Nippon Telegraph and Telephone Corporation.
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//    http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or
+// implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+syntax = "proto3";
+
+package gobgpapi;
+
+option go_package = "github.com/osrg/gobgp/v3/api;gobgpapi";
+
+import "google/protobuf/any.proto";
+import "google/protobuf/timestamp.proto";
+
+service GobgpApi {
+  rpc StartBgp(StartBgpRequest) returns (StartBgpResponse);
+  rpc StopBgp(StopBgpRequest) returns (StopBgpResponse);
+  rpc GetBgp(GetBgpRequest) returns (GetBgpResponse);
+
+  rpc AddPeer(AddPeerRequest) returns (AddPeerResponse);
+  rpc DeletePeer(DeletePeerRequest) returns (DeletePeerResponse);
+  rpc ListPeer(ListPeerRequest) returns (stream ListPeerResponse);
+  rpc UpdatePeer(UpdatePeerRequest) returns (UpdatePeerResponse);
+  rpc ResetPeer(ResetPeerRequest) returns (ResetPeerResponse);
+  rpc ShutdownPeer(ShutdownPeerRequest) returns (ShutdownPeerResponse);
+  rpc EnablePeer(EnablePeerRequest) returns (EnablePeerResponse);
+  rpc DisablePeer(DisablePeerRequest) returns (DisablePeerResponse);
+
+  rpc AddPath(AddPathRequest) returns (AddPathResponse);
+  rpc DeletePath(DeletePathRequest) returns (DeletePathResponse);
+  rpc ListPath(ListPathRequest) returns (stream ListPathResponse);
+
+  rpc AddDefinedSet(AddDefinedSetRequest) returns (AddDefinedSetResponse);
+  rpc DeleteDefinedSet(DeleteDefinedSetRequest) returns (DeleteDefinedSetResponse);
+  rpc ListDefinedSet(ListDefinedSetRequest) returns (stream ListDefinedSetResponse);
+
+  rpc AddStatement(AddStatementRequest) returns (AddStatementResponse);
+  rpc DeleteStatement(DeleteStatementRequest) returns (DeleteStatementResponse);
+  rpc ListStatement(ListStatementRequest) returns (stream ListStatementResponse);
+
+  rpc AddPolicy(AddPolicyRequest) returns (AddPolicyResponse);
+  rpc DeletePolicy(DeletePolicyRequest) returns (DeletePolicyResponse);
+  rpc ListPolicy(ListPolicyRequest) returns (stream ListPolicyResponse);
+
+  rpc WatchEvent(WatchEventRequest) returns (stream WatchEventResponse);
+}
+
+message StartBgpRequest {
+  Global global = 1;
+}
+
+message StartBgpResponse {}
+
+message StopBgpRequest {}
+
+message StopBgpResponse {}
+
+message GetBgpRequest {}
+
+message GetBgpResponse {
+  Global global = 1;
+}
+
+message Global {
+  uint32 asn = 1;
+  string router_id = 2;
+  int32 listen_port = 3;
+  repeated string listen_addresses = 4;
+  repeated Family families = 5;
+  bool use_multiple_paths = 6;
+}
+
+message Family {
+  enum Afi {
+    AFI_UNKNOWN = 0;
+    AFI_IP = 1;
+    AFI_IP6 = 2;
+    AFI_L2VPN = 25;
+    AFI_LS = 16388;
+    AFI_OPAQUE = 16397;
+  }
+  enum Safi {
+    SAFI_UNKNOWN = 0;
+    SAFI_UNICAST = 1;
+    SAFI_MULTICAST = 2;
+    SAFI_MPLS_LABEL = 4;
+    SAFI_ENCAPSULATION = 7;
+    SAFI_VPLS = 65;
+    SAFI_EVPN = 70;
+    SAFI_ROUTER_SERVER_ROUTING = 80;
+    SAFI_FLOW_SPEC_UNICAST = 133;
+    SAFI_FLOW_SPEC_VPN = 134;
+    SAFI_KEY_VALUE = 241;
+  }
+  Afi afi = 1;
+  Safi safi = 2;
+}
+
+message Peer {
+  PeerConf conf = 1;
+  PeerState state = 2;
+  Timers timers = 3;
+  RouteReflector route_reflector = 4;
+  RouteServer route_server = 5;
+}
+
+message PeerConf {
+  string neighbor_address = 1;
+  string id = 2;
+  uint32 peer_as = 3;
+  uint32 local_as = 4;
+  string description = 5;
+  string peer_group = 6;
+  string interface = 7;
+  repeated Family families = 8;
+}
+
+message PeerState {
+  enum SessionState {
+    UNKNOWN = 0;
+    IDLE = 1;
+    CONNECT = 2;
+    ACTIVE = 3;
+    OPENSENT = 4;
+    OPENCONFIRM = 5;
+    ESTABLISHED = 6;
+  }
+  SessionState session_state = 1;
+  enum AdminState {
+    UP = 0;
+    DOWN = 1;
+    PFX_CT = 2;
+  }
+  AdminState admin_state = 2;
+  uint32 messages_in = 3;
+  uint32 messages_out = 4;
+  uint32 flaps = 5;
+  google.protobuf.Timestamp uptime = 6;
+  google.protobuf.Timestamp downtime = 7;
+  string router_id = 8;
+  repeated PeerPrefixCounters prefix_counters = 9;
+}
+
+message PeerPrefixCounters {
+  Family family = 1;
+  uint64 received = 2;
+  uint64 accepted = 3;
+  uint64 advertised = 4;
+}
+
+message Timers {
+  TimersConfig config = 1;
+  TimersState state = 2;
+}
+
+message TimersConfig {
+  uint64 connect_retry = 1;
+  uint64 hold_time = 2;
+  uint64 keepalive_interval = 3;
+}
+
+message TimersState {
+  uint64 keepalive_interval = 1;
+  uint64 negotiated_hold_time = 2;
+  google.protobuf.Timestamp uptime = 3;
+  google.protobuf.Timestamp downtime = 4;
+}
+
+message RouteReflector {
+  bool route_reflector_client = 1;
+  string route_reflector_cluster_id = 2;
+}
+
+message RouteServer {
+  bool route_server_client = 1;
+  bool secondary_route = 2;
+}
+
+message AddPeerRequest {
+  Peer peer = 1;
+}
+
+message AddPeerResponse {}
+
+message DeletePeerRequest {
+  string address = 1;
+  string interface = 2;
+}
+
+message DeletePeerResponse {}
+
+message ListPeerRequest {
+  string address = 1;
+  bool enable_advertised = 2;
+}
+
+message ListPeerResponse {
+  Peer peer = 1;
+}
+
+message UpdatePeerRequest {
+  Peer peer = 1;
+  bool do_soft_reset_in = 2;
+}
+
+message UpdatePeerResponse {}
+
+message ResetPeerRequest {
+  string address = 1;
+  string communication = 2;
+  bool soft = 3;
+  enum Direction {
+    IN = 0;
+    OUT = 1;
+    BOTH = 2;
+  }
+  Direction direction = 4;
+}
+
+message ResetPeerResponse {}
+
+message ShutdownPeerRequest {
+  string address = 1;
+  string communication = 2;
+}
+
+message ShutdownPeerResponse {}
+
+message EnablePeerRequest {
+  string address = 1;
+}
+
+message EnablePeerResponse {}
+
+message DisablePeerRequest {
+  string address = 1;
+  string communication = 2;
+}
+
+message DisablePeerResponse {}
+
+enum TableType {
+  GLOBAL = 0;
+  LOCAL = 1;
+  ADJ_IN = 2;
+  ADJ_OUT = 3;
+}
+
+message Path {
+  google.protobuf.Any nlri = 1;
+  repeated google.protobuf.Any pattrs = 2;
+  google.protobuf.Timestamp age = 3;
+  bool best = 4;
+  bool is_withdraw = 5;
+  Validation validation = 6;
+  Family family = 7;
+  string source_id = 8;
+  string neighbor_ip = 9;
+  uint32 uuid = 10;
+  bool is_stale = 11;
+  uint32 identifier = 12;
+  bool local_identifier = 13;
+}
+
+message Validation {
+  enum State {
+    STATE_NONE = 0;
+    STATE_NOT_FOUND = 1;
+    STATE_VALID = 2;
+    STATE_INVALID = 3;
+  }
+  State state = 1;
+  enum Reason {
+    REASON_NONE = 0;
+    REASON_ASN = 1;
+    REASON_LENGTH = 2;
+  }
+  Reason reason = 2;
+  repeated string matched = 3;
+  repeated string unmatched_as = 4;
+  repeated string unmatched_length = 5;
+}
+
+message AddPathRequest {
+  TableType table_type = 1;
+  string vrf_id = 2;
+  Path path = 3;
+}
+
+message AddPathResponse {
+  bytes uuid = 1;
+}
+
+message DeletePathRequest {
+  TableType table_type = 1;
+  string vrf_id = 2;
+  Path path = 3;
+  bytes uuid = 4;
+}
+
+message DeletePathResponse {}
+
+message ListPathRequest {
+  TableType table_type = 1;
+  Family family = 2;
+  string name = 3;
+  bool sort_type = 4;
+  repeated Path prefixes = 5;
+  bool enable_filtered = 6;
+}
+
+message ListPathResponse {
+  Destination destination = 1;
+}
+
+message Destination {
+  string prefix = 1;
+  repeated Path paths = 2;
+}
+
+message AddDefinedSetRequest {}
+message AddDefinedSetResponse {}
+message DeleteDefinedSetRequest {}
+message DeleteDefinedSetResponse {}
+message ListDefinedSetRequest {}
+message ListDefinedSetResponse {}
+
+message AddStatementRequest {}
+message AddStatementResponse {}
+message DeleteStatementRequest {}
+message DeleteStatementResponse {}
+message ListStatementRequest {}
+message ListStatementResponse {}
+
+message AddPolicyRequest {}
+message AddPolicyResponse {}
+message DeletePolicyRequest {}
+message DeletePolicyResponse {}
+message ListPolicyRequest {}
+message ListPolicyResponse {}
+
+message WatchEventRequest {}
+message WatchEventResponse {}

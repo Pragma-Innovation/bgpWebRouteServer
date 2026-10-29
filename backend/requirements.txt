@@ -1,0 +1,28 @@
+# ==============================================================================
+# bgpWebRouteServer - Python Backend Dependencies
+# ==============================================================================
+
+# Core Framework (Strictly Django 5.2 LTS)
+Django>=5.2,<5.3
+
+# Django REST Framework & Utilities
+djangorestframework>=3.15.0
+djangorestframework-simplejwt>=5.3.1
+django-cors-headers>=4.3.0
+django-environ>=0.11.2
+
+# PostgreSQL Driver (psycopg 3 with binary extensions)
+psycopg[binary]>=3.1.18
+
+# GoBGP gRPC & Protobuf client
+grpcio>=1.62.0
+protobuf>=4.25.0
+
+# Production WSGI / ASGI Server
+gunicorn>=21.2.0
+uvicorn>=0.29.0
+
+# Testing & Debugging
+pytest>=8.1.0
+pytest-django>=4.8.0
+debugpy>=1.8.0

@@ -1,0 +1,79 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: backend
+  namespace: bgpweb
+  labels:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: backend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: backend
+  ports:
+    - name: http
+      port: 8000
+      targetPort: 8000
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: frontend
+  namespace: bgpweb
+  labels:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: frontend
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: frontend
+  ports:
+    - name: http
+      port: 8080
+      targetPort: 8080
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gobgp
+  namespace: bgpweb
+  labels:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: bgp-daemon
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: bgp-daemon
+  ports:
+    - name: grpc
+      port: 50051
+      targetPort: 50051
+      protocol: TCP
+    - name: bgp
+      port: 179
+      targetPort: 179
+      protocol: TCP
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: bgpweb
+  labels:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: database
+spec:
+  type: ClusterIP
+  selector:
+    app.kubernetes.io/name: bgpweb
+    app.kubernetes.io/component: database
+  ports:
+    - name: postgres
+      port: 5432
+      targetPort: 5432
+      protocol: TCP

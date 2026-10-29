@@ -1,0 +1,110 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: bgpweb-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: bgpweb
+      POSTGRES_USER: bgpuser
+      POSTGRES_PASSWORD: bgppassword
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U bgpuser -d bgpweb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - bgpnet
+
+  backend:
+    build:
+      context: .
+      dockerfile: deploy/docker/backend.Dockerfile
+    container_name: bgpweb-backend
+    restart: unless-stopped
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    environment:
+      - DJANGO_SETTINGS_MODULE=config.settings.development
+      - DJANGO_DEBUG=True
+      - ENABLE_DEBUGPY=True
+      - DJANGO_SECRET_KEY=dev-secret-key-for-local-docker-compose-testing
+      - DJANGO_ALLOWED_HOSTS=localhost,127.0.0.1,0.0.0.0,backend
+      - DATABASE_URL=postgres://bgpuser:bgppassword@db:5432/bgpweb
+      - CORS_ALLOWED_ORIGINS=http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000
+      - BGP_ENGINE_BACKEND=apps.bgp_engine.backends.gobgp.GoBgpBackend
+      - BGP_MOCK_MODE=False
+      - GOBGP_GRPC_HOST=gobgp
+      - GOBGP_GRPC_PORT=50051
+    depends_on:
+      db:
+        condition: service_healthy
+      gobgp:
+        condition: service_started
+    networks:
+      - bgpnet
+
+  frontend:
+    build:
+      context: .
+      dockerfile: deploy/docker/frontend.Dockerfile
+      target: development
+    container_name: bgpweb-frontend
+    restart: unless-stopped
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      - VITE_API_URL=http://backend:8000
+    depends_on:
+      - backend
+    networks:
+      - bgpnet
+
+  gobgp:
+    image: osrg/gobgp:latest
+    container_name: bgpweb-gobgp
+    restart: unless-stopped
+    entrypoint: ["gobgpd", "-f", "/etc/gobgp/gobgp.yaml", "-t", "yaml", "--api-hosts", ":50051"]
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./configs/gobgp.yaml:/etc/gobgp/gobgp.yaml:ro
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.10
+
+  bird:
+    build:
+      context: .
+      dockerfile: deploy/docker/bird.Dockerfile
+    container_name: bgpweb-bird
+    restart: unless-stopped
+    volumes:
+      - ./configs/bird.conf:/etc/bird.conf:ro
+    depends_on:
+      - gobgp
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.20
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  bgpnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.100.0.0/24
