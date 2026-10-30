@@ -6,14 +6,14 @@ help:
 	@echo "  make k8s-validate      - Validate all Kubernetes manifests using kustomize"
 	@echo "  make k8s-dev           - Deploy dev overlay to active Kubernetes cluster"
 	@echo "  make k8s-prod          - Deploy prod overlay to active Kubernetes cluster"
-	@echo "  make docker-build      - Build backend, frontend, and gobgp Docker images"
+	@echo "  make docker-build      - Build backend, frontend, and bird Docker images"
 	@echo "  make docker-up         - Start local stack via Docker Compose"
 	@echo "  make docker-down       - Stop local Docker Compose stack"
-	@echo "  make lab-up            - Build & start full eBGP lab (GoBGP + BIRD 3 + Django + UI)"
-	@echo "  make lab-down          - Stop full eBGP lab"
-	@echo "  make lab-status        - Display BGP session state across GoBGP and BIRD"
-	@echo "  make bird-routes       - Query BIRD 3 received Flowspec routes (table t_flow4)"
-	@echo "  make bird-unicast      - Query BIRD 3 received Unicast routes (table t_unicast4)"
+	@echo "  make lab-up            - Build & start full multi-peer lab (GoBGP + 3x BIRD + Django + UI)"
+	@echo "  make lab-down          - Stop full lab"
+	@echo "  make lab-status        - Display BGP session state across GoBGP and all 3 BIRD routers"
+	@echo "  make bird-routes       - Query received Flowspec routes across all BIRD routers"
+	@echo "  make bird-unicast      - Query received Unicast RTBH routes across all BIRD routers"
 	@echo "  make test-integration  - Run automated end-to-end Flowspec & RTBH propagation test"
 
 test:
@@ -52,13 +52,36 @@ lab-down:
 
 lab-status:
 	@echo "=== GoBGP Neighbors ==="
-	@docker-compose exec -T gobgp gobgp neighbor || true
+	@podman exec bgpweb-gobgp gobgp neighbor || docker-compose exec -T gobgp gobgp neighbor || true
 	@echo ""
-	@echo "=== BIRD 3 Protocols ==="
-	@docker-compose exec -T bird birdc show protocols all gobgp_peer || true
+	@echo "=== BIRD eBGP (10.100.0.20, AS 65001) ==="
+	@podman exec bgpweb-bird birdc show protocols all gobgp_peer || true
+	@echo ""
+	@echo "=== BIRD iBGP 1 (10.100.0.30, AS 65000) ==="
+	@podman exec bgpweb-bird-ibgp1 birdc show protocols all gobgp_peer || true
+	@echo ""
+	@echo "=== BIRD iBGP 2 (10.100.0.40, AS 65000) ==="
+	@podman exec bgpweb-bird-ibgp2 birdc show protocols all gobgp_peer || true
 
 bird-routes:
-	@docker-compose exec -T bird birdc show route table t_flow4 all
+	@echo "=== BIRD eBGP Flowspec Routes ==="
+	@podman exec bgpweb-bird birdc show route table t_flow4 all || true
+	@echo ""
+	@echo "=== BIRD iBGP 1 Flowspec Routes ==="
+	@podman exec bgpweb-bird-ibgp1 birdc show route table t_flow4 all || true
+	@echo ""
+	@echo "=== BIRD iBGP 2 Flowspec Routes ==="
+	@podman exec bgpweb-bird-ibgp2 birdc show route table t_flow4 all || true
+
+bird-unicast:
+	@echo "=== BIRD eBGP Unicast Routes ==="
+	@podman exec bgpweb-bird birdc show route table t_unicast4 all || true
+	@echo ""
+	@echo "=== BIRD iBGP 1 Unicast Routes ==="
+	@podman exec bgpweb-bird-ibgp1 birdc show route table t_unicast4 all || true
+	@echo ""
+	@echo "=== BIRD iBGP 2 Unicast Routes ==="
+	@podman exec bgpweb-bird-ibgp2 birdc show route table t_unicast4 all || true
 
 test-integration:
 	python3 tests/integration/test_ebgp_flowspec_propagation.py

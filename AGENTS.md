@@ -24,7 +24,7 @@ bgpWebRouteServer/
 ├── README.md                       # Project overview, dedication, and quickstart guide
 ├── SPECS.md                        # Authoritative functional & technical specifications
 ├── AGENTS.md                       # Agent operational rules & workflows (this file)
-├── docker-compose.yml              # Local compose stack (Postgres, Backend, Frontend, GoBGP, BIRD)
+├── docker-compose.yml              # Local compose stack (Postgres, Backend, Frontend, GoBGP, 3x BIRD)
 ├── Makefile                        # Canonical operational commands
 ├── deploy/                         # Multi-stage Dockerfiles & Kubernetes manifests
 │   ├── docker/                     # Dockerfiles (backend, frontend, bird, gobgp)
@@ -45,21 +45,26 @@ bgpWebRouteServer/
 │       ├── flowspec/               # BGP Flowspec rules management (RFC 5575 / RFC 8955)
 │       │   ├── models.py           # FlowspecRule (15 match criteria + action types)
 │       │   └── views.py            # FlowspecRuleViewSet
-│       ├── peers/                  # BGP Neighbors & Peering session state
+│       ├── peers/                  # BGP Neighbors, Peering Sessions & Global Router Identity
+│       │   ├── models.py           # BgpGlobalConfig (singleton), BgpPeerConfig
+│       │   ├── serializers.py      # BgpGlobalConfigSerializer, BgpPeerConfigSerializer
+│       │   ├── services.py         # PeerReconciliationService (unified session consolidation & active reconcile)
+│       │   ├── management/         # run_peer_syncer daemon CLI command
+│       │   └── views.py            # BgpGlobalConfigView, BgpPeerConfigViewSet (sessions, reconcile, adopt, reset)
 │       └── bgp_engine/             # Pluggable BGP Abstraction & Drivers
-│           ├── base.py             # BaseBgpBackend (Abstract Base Class)
+│           ├── base.py             # BaseBgpBackend (Abstract Base Class with peer methods)
 │           ├── manager.py          # BgpManager factory
-│           ├── permissions.py      # IsOperatorOrReadOnly RBAC permission classes
-│           └── backends/           # Drivers: gobgp/ (gRPC), bird/ (ctl), mock/ (testing)
+│           ├── permissions.py      # IsOperatorOrReadOnly, IsAdminOrReadOnly RBAC permissions
+│           └── backends/           # Drivers: gobgp/ (gRPC & config writer), bird/, mock/
 ├── web/                            # Frontend Vue 3 Single Page Application
 │   ├── index.html
 │   ├── vite.config.ts
 │   └── src/
 │       ├── api/client.ts           # Axios client configured with JWT interceptor
-│       ├── stores/                 # Pinia stores (prefixStore, routingStore, flowspecStore, peersStore)
-│       ├── views/                  # PrefixInventoryView, FlowspecView, RoutingWorkflowView, AnnouncementsView
-│       └── components/             # Reusable modal builders and badges
-├── configs/                        # GoBGP and BIRD 3 peering configuration files
+│       ├── stores/                 # Pinia stores (prefixStore, routingStore, flowspecStore, bgpStore)
+│       ├── views/                  # PrefixInventoryView, FlowspecView, RoutingWorkflowView, AnnouncementsView, PeersView
+│       └── components/             # GlobalConfigModal, PeerModal, RuleBuilderModal, StatusBadge
+├── configs/                        # GoBGP and BIRD 3 (eBGP & 2x iBGP) configuration files
 └── tests/                          # Integration test suites
     └── integration/                # test_ebgp_flowspec_propagation.py
 ```

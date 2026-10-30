@@ -30,7 +30,6 @@ const form = reactive({
   ip_frag: '',
   action: 'Drop' as 'Drop' | 'Shape' | 'Redirect' | 'Mark',
   action_value: '',
-  is_active: true,
 })
 
 // Quick protocol selector helper
@@ -309,13 +308,6 @@ async function submitForm() {
               />
             </div>
           </div>
-
-          <div class="checkbox-row mt-2">
-            <label class="checkbox-label font-medium">
-              <input type="checkbox" v-model="form.is_active" />
-              <span>Inject into BGP RIB immediately upon creation</span>
-            </label>
-          </div>
         </div>
 
         <!-- Modal Footer -->
@@ -324,7 +316,7 @@ async function submitForm() {
             Cancel
           </button>
           <button type="submit" class="btn btn-primary" :disabled="isSubmitting">
-            <Check :size="18" /> {{ isSubmitting ? 'Injecting Rule...' : 'Create & Apply Rule' }}
+            <Check :size="18" /> {{ isSubmitting ? 'Creating Rule...' : 'Create Flowspec Rule' }}
           </button>
         </div>
       </form>

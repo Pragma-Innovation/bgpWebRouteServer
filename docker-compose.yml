@@ -28,6 +28,7 @@ services:
     command: python manage.py runserver 0.0.0.0:8000
     volumes:
       - ./backend:/app
+      - ./configs:/configs
     ports:
       - "8000:8000"
       - "5678:5678"
@@ -90,12 +91,40 @@ services:
     container_name: bgpweb-bird
     restart: unless-stopped
     volumes:
-      - ./configs/bird.conf:/etc/bird.conf:ro
+      - ./configs/bird-ebgp.conf:/etc/bird.conf:ro
     depends_on:
       - gobgp
     networks:
       bgpnet:
         ipv4_address: 10.100.0.20
+
+  bird-ibgp1:
+    build:
+      context: .
+      dockerfile: deploy/docker/bird.Dockerfile
+    container_name: bgpweb-bird-ibgp1
+    restart: unless-stopped
+    volumes:
+      - ./configs/bird-ibgp1.conf:/etc/bird.conf:ro
+    depends_on:
+      - gobgp
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.30
+
+  bird-ibgp2:
+    build:
+      context: .
+      dockerfile: deploy/docker/bird.Dockerfile
+    container_name: bgpweb-bird-ibgp2
+    restart: unless-stopped
+    volumes:
+      - ./configs/bird-ibgp2.conf:/etc/bird.conf:ro
+    depends_on:
+      - gobgp
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.40
 
 volumes:
   pgdata:

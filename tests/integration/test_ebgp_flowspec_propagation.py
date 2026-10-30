@@ -1,13 +1,19 @@
 #!/usr/bin/env python3
 """
-End-to-End Integration Test:
-Verifies the new hierarchical workflow:
-1. Asset Creation: IP Prefixes & Flowspec NLRIs.
-2. Pseudo-RIB Assignment: Add prefixes & Flowspec rules to Pseudo-RIBs.
-3. Master RIB Assembly & Push: Synchronize Master RIB to GoBGP.
-4. GoBGP & BIRD 3 Peering Verification: Unicast RTBH and Flowspec active in BIRD.
-5. Member Removal & Push Reconciliation: Verify clean withdrawal in BIRD.
-6. Unified Announcements API: Test multi-facet filtering (pseudo-rib, afi_safi, tuple).
+End-to-End Multi-Peer Integration Test (eBGP & iBGP):
+Verifies the complete hierarchical workflow across a 3-router BIRD test lab:
+- Router 1 (eBGP): bgpweb-bird (10.100.0.20, AS 65001)
+- Router 2 (iBGP): bgpweb-bird-ibgp1 (10.100.0.30, AS 65000)
+- Router 3 (iBGP): bgpweb-bird-ibgp2 (10.100.0.40, AS 65000)
+
+Workflow tested:
+1. Multi-Peer BGP Session Verification (eBGP + 2x iBGP).
+2. Asset Creation: IP Prefixes & Flowspec NLRIs.
+3. Pseudo-RIB Assignment: Add prefixes & Flowspec rules to Pseudo-RIBs.
+4. Master RIB Assembly & Push: Synchronize Master RIB to GoBGP.
+5. Multi-Peer Propagation Verification: Unicast RTBH and Flowspec active in all 3 routers.
+6. Member Removal & Push Reconciliation: Verify clean withdrawal across all 3 routers.
+7. Unified Announcements API: Test multi-facet filtering (pseudo-rib, afi_safi, tuple).
 """
 import json
 import subprocess
@@ -18,6 +24,12 @@ import urllib.error
 
 BASE_URL = "http://localhost:8000/api/v1"
 CONTAINER_CMD = "podman" if subprocess.run(["which", "podman"], capture_output=True).returncode == 0 else "docker"
+
+BIRD_ROUTERS = [
+    {"name": "bgpweb-bird", "type": "eBGP", "ip": "10.100.0.20", "asn": 65001},
+    {"name": "bgpweb-bird-ibgp1", "type": "iBGP (Core 1)", "ip": "10.100.0.30", "asn": 65000},
+    {"name": "bgpweb-bird-ibgp2", "type": "iBGP (Core 2)", "ip": "10.100.0.40", "asn": 65000},
+]
 
 
 def run_container_cmd(container: str, cmd_args: list) -> str:
@@ -72,28 +84,29 @@ def api_delete(endpoint: str, token: str) -> int:
 
 
 def main():
-    print("=" * 75)
-    print(" MULTI-AFI/SAFI LAB: PSEUDO-RIB, MASTER RIB & GOBGP <-> BIRD 3 PROPAGATION")
-    print("=" * 75)
+    print("=" * 80)
+    print(" MULTI-PEER LAB: eBGP & iBGP PROPAGATION (1x eBGP + 2x iBGP ROUTERS)")
+    print("=" * 80)
 
-    # 1. Verify eBGP Session Status
-    print("\n[Step 1] Verifying eBGP Session between GoBGP (10.100.0.10) & BIRD (10.100.0.20)...")
-    max_retries = 10
-    established = False
-    for attempt in range(max_retries):
-        try:
-            proto_status = run_container_cmd("bgpweb-bird", ["birdc", "show", "protocols", "all", "gobgp_peer"])
-            if "BGP state:          Established" in proto_status:
-                print("  ✓ BIRD reports BGP state: Established")
-                established = True
-                break
-        except Exception as e:
-            print(f"  Attempt {attempt+1}: {e}")
-        time.sleep(2)
+    # 1. Verify BGP Sessions Status for all 3 routers
+    print("\n[Step 1] Verifying BGP Sessions between GoBGP (10.100.0.10) & 3 BIRD Routers...")
+    for router in BIRD_ROUTERS:
+        max_retries = 10
+        established = False
+        for attempt in range(max_retries):
+            try:
+                proto_status = run_container_cmd(router["name"], ["birdc", "show", "protocols", "all", "gobgp_peer"])
+                if "BGP state:          Established" in proto_status:
+                    print(f"  ✓ {router['name']} ({router['type']}, AS{router['asn']} @ {router['ip']}) -> Established")
+                    established = True
+                    break
+            except Exception as e:
+                pass
+            time.sleep(1)
 
-    if not established:
-        print("  ✗ ERROR: BGP session between GoBGP and BIRD is not Established!")
-        sys.exit(1)
+        if not established:
+            print(f"  ✗ ERROR: BGP session with {router['name']} is not Established!")
+            sys.exit(1)
 
     # 2. Authenticate as Operator
     print("\n[Step 2] Authenticating as 'operator' via Django REST JWT...")
@@ -156,28 +169,25 @@ def main():
     print("\n[Step 7] Checking GoBGP Global Loc-RIB via CLI...")
     time.sleep(1)
     gobgp_v4 = run_container_cmd("bgpweb-gobgp", ["gobgp", "global", "rib", "-a", "ipv4"])
-    print(f"  GoBGP IPv4 Loc-RIB:\n{gobgp_v4}")
     assert "198.51.100.77/32" in gobgp_v4, "Unicast RTBH route missing from GoBGP!"
     print("  ✓ GoBGP IPv4 Loc-RIB contains the RTBH route.")
 
     gobgp_flow = run_container_cmd("bgpweb-gobgp", ["gobgp", "global", "rib", "-a", "ipv4-flowspec"])
-    print(f"  GoBGP Flowspec Loc-RIB:\n{gobgp_flow}")
     assert "198.51.100.222/32" in gobgp_flow, "Flowspec rule missing from GoBGP!"
     print("  ✓ GoBGP Flowspec Loc-RIB contains the Flowspec rule.")
 
-    # 8. Check BIRD 3 Tables (t_unicast4 and t_flow4)
-    print("\n[Step 8] Checking BIRD 3 received tables (t_unicast4 and t_flow4)...")
-    bird_v4 = run_container_cmd("bgpweb-bird", ["birdc", "show", "route", "table", "t_unicast4", "all"])
-    print(f"  BIRD t_unicast4 Table:\n{bird_v4}")
-    assert "198.51.100.77/32" in bird_v4, "RTBH Route not installed in BIRD t_unicast4!"
-    assert "blackhole" in bird_v4, "BIRD did not set destination to blackhole!"
-    assert "(65535,666)" in bird_v4 or "(65535, 666)" in bird_v4, "RFC 7999 community missing in BIRD!"
-    print("  ✓ BIRD 3 verified: 198.51.100.77/32 installed as RTD_BLACKHOLE via community (65535, 666)!")
+    # 8. Check BIRD Tables (t_unicast4 and t_flow4) across ALL 3 ROUTERS
+    print("\n[Step 8] Checking BIRD Route Tables across all 3 routers (eBGP & 2x iBGP)...")
+    for router in BIRD_ROUTERS:
+        bird_v4 = run_container_cmd(router["name"], ["birdc", "show", "route", "table", "t_unicast4", "all"])
+        assert "198.51.100.77/32" in bird_v4, f"RTBH Route missing in {router['name']} t_unicast4!"
+        assert "blackhole" in bird_v4, f"{router['name']} did not set destination to blackhole!"
+        assert "(65535,666)" in bird_v4 or "(65535, 666)" in bird_v4, f"RFC 7999 community missing in {router['name']}!"
+        print(f"  ✓ {router['name']} ({router['type']}): 198.51.100.77/32 installed as RTD_BLACKHOLE!")
 
-    bird_flow = run_container_cmd("bgpweb-bird", ["birdc", "show", "route", "table", "t_flow4", "all"])
-    print(f"  BIRD t_flow4 Table:\n{bird_flow}")
-    assert "198.51.100.222/32" in bird_flow, "Flowspec route not installed in BIRD t_flow4!"
-    print("  ✓ BIRD 3 verified: Flowspec rule received and active in t_flow4!")
+        bird_flow = run_container_cmd(router["name"], ["birdc", "show", "route", "table", "t_flow4", "all"])
+        assert "198.51.100.222/32" in bird_flow, f"Flowspec route missing in {router['name']} t_flow4!"
+        print(f"  ✓ {router['name']} ({router['type']}): Flowspec rule installed in t_flow4!")
 
     # 9. Verify Global Announcements API & Multi-Facet Filters
     print("\n[Step 9] Verifying Unified Announcements API & Filtering...")
@@ -185,34 +195,34 @@ def main():
     print(f"  ✓ Total announcements in Loc-RIB API: {len(all_announcements)}")
     assert len(all_announcements) >= 2, "Expected at least 2 announcements in Loc-RIB API!"
 
-    # Filter by pseudo_rib
     filtered_pr = api_get(f"/routing/announcements/?pseudo_rib={rtbh_rib['id']}", token)
     assert all(a["pseudo_rib"] == rtbh_rib["id"] for a in filtered_pr), "Pseudo-RIB filter failed!"
     print(f"  ✓ Pseudo-RIB filter verified ({len(filtered_pr)} routes).")
 
-    # Filter by Flowspec tuple (port 22)
     filtered_port = api_get("/routing/announcements/?port=22", token)
     assert any("22" in a["route_repr"] or (a.get("flowspec_tuple") and a["flowspec_tuple"].get("dst_port") == "22") for a in filtered_port), "Port filter failed!"
     print(f"  ✓ Flowspec tuple filter (port=22) verified ({len(filtered_port)} routes).")
 
-    # 10. Member Removal & Master RIB Reconciliation (Withdrawal)
+    # 10. Member Removal & Master RIB Reconciliation (Withdrawal across all 3 routers)
     print("\n[Step 10] Removing Prefix from Pseudo-RIB and Pushing Reconciliation...")
     api_post(f"/routing/pseudo-ribs/{rtbh_rib['id']}/remove-prefix/", {"prefix_id": prefix_id}, token)
     api_post(f"/routing/ribs/{master_rib['id']}/push/", {}, token)
 
     time.sleep(1)
-    print("\n[Step 11] Verifying Clean Route Withdrawal in BIRD 3...")
-    bird_v4_after = run_container_cmd("bgpweb-bird", ["birdc", "show", "route", "table", "t_unicast4", "all"])
-    assert "198.51.100.77/32" not in bird_v4_after, "RTBH Route was not purged from BIRD!"
-    print("  ✓ RTBH Route was purged from BIRD 3 unicast table upon RIB push!")
+    print("\n[Step 11] Verifying Clean Route Withdrawal across all 3 BIRD Routers...")
+    for router in BIRD_ROUTERS:
+        bird_v4_after = run_container_cmd(router["name"], ["birdc", "show", "route", "table", "t_unicast4", "all"])
+        assert "198.51.100.77/32" not in bird_v4_after, f"RTBH Route was not purged from {router['name']}!"
+        print(f"  ✓ {router['name']} ({router['type']}): RTBH Route purged from unicast table!")
 
     # Clean up flowspec rule from Pseudo-RIB and push again
     api_post(f"/routing/pseudo-ribs/{flow_rib['id']}/remove-flowspec/", {"rule_id": rule_id}, token)
     api_post(f"/routing/ribs/{master_rib['id']}/push/", {}, token)
     time.sleep(1)
-    bird_flow_after = run_container_cmd("bgpweb-bird", ["birdc", "show", "route", "table", "t_flow4", "all"])
-    assert "198.51.100.222/32" not in bird_flow_after, "Flowspec rule was not purged from BIRD!"
-    print("  ✓ Flowspec Route was purged from BIRD 3 flow table upon RIB push!")
+    for router in BIRD_ROUTERS:
+        bird_flow_after = run_container_cmd(router["name"], ["birdc", "show", "route", "table", "t_flow4", "all"])
+        assert "198.51.100.222/32" not in bird_flow_after, f"Flowspec rule was not purged from {router['name']}!"
+        print(f"  ✓ {router['name']} ({router['type']}): Flowspec rule purged from flow table!")
 
     # 11. Cleanup test inventory records
     print("\n[Step 12] Cleaning up test inventory records...")
@@ -220,10 +230,10 @@ def main():
     api_delete(f"/flowspec/rules/{rule_id}/", token)
     print("  ✓ Test inventory records deleted.")
 
-    print("\n" + "=" * 75)
-    print(" ALL HIERARCHICAL WORKFLOW INTEGRATION TESTS PASSED SUCCESSFULLY! ")
-    print(" Verified: Asset -> Pseudo-RIB -> Master RIB -> GoBGP -> BIRD 3 & Announcements UI")
-    print("=" * 75)
+    print("\n" + "=" * 80)
+    print(" ALL MULTI-PEER PROPAGATION TESTS PASSED (eBGP + 2x iBGP ROUTERS)! ")
+    print(" Verified: Asset -> Pseudo-RIB -> Master RIB -> GoBGP -> 3x BIRD Routers")
+    print("=" * 80)
 
 
 if __name__ == "__main__":

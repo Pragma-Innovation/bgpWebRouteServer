@@ -6,7 +6,7 @@ export interface FlowspecRule {
   id: number
   name: string
   description: string
-  is_active: boolean
+  is_active?: boolean
   addr_fam: 'IPv4' | 'IPv6'
   dst_prefix: string
   src_prefix: string
@@ -22,6 +22,7 @@ export interface FlowspecRule {
   ip_frag: string
   action: 'Drop' | 'Shape' | 'Redirect' | 'Mark'
   action_value: string
+  pseudo_ribs?: Array<{ id: number; name: string; afi_safi: string }>
   created_at: string
   updated_at: string
 }
@@ -46,18 +47,6 @@ export const useFlowspecStore = defineStore('flowspec', () => {
       error.value = err.message || 'Failed to fetch Flowspec rules'
     } finally {
       loading.value = false
-    }
-  }
-
-  async function toggleRule(id: number) {
-    try {
-      const res = await apiClient.post<{ id: number; is_active: boolean }>(`/flowspec/rules/${id}/toggle/`)
-      const rule = rules.value.find(r => r.id === id)
-      if (rule) {
-        rule.is_active = res.data.is_active
-      }
-    } catch (err: any) {
-      error.value = err.message || `Failed to toggle rule #${id}`
     }
   }
 
@@ -90,7 +79,6 @@ export const useFlowspecStore = defineStore('flowspec', () => {
     loading,
     error,
     fetchRules,
-    toggleRule,
     deleteRule,
     createRule,
   }

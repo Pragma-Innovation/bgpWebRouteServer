@@ -2,7 +2,8 @@
 import { ref } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useAuthStore } from '../stores/authStore'
-import { Radio, Lock, User, Eye, EyeOff, ShieldCheck } from 'lucide-vue-next'
+import GabuLogo from '../components/GabuLogo.vue'
+import { Lock, User, Eye, EyeOff, ShieldCheck } from 'lucide-vue-next'
 
 const router = useRouter()
 const route = useRoute()
@@ -50,10 +51,10 @@ function fillDemoAccount(u: string, p: string) {
       <!-- Header -->
       <div class="login-header">
         <div class="brand-badge">
-          <Radio :size="28" />
+          <GabuLogo :size="38" />
         </div>
-        <h2>bgpWebRouteServer</h2>
-        <p class="subtitle">BGP Control Plane & Flowspec Mitigation</p>
+        <h2>GABU</h2>
+        <p class="subtitle">BGP Route Server & Traffic Mitigation</p>
       </div>
 
       <!-- Error Alert -->
@@ -173,21 +174,22 @@ function fillDemoAccount(u: string, p: string) {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 56px;
-  height: 56px;
-  background: linear-gradient(135deg, #3b82f6, #06b6d4);
-  border-radius: 14px;
+  width: 60px;
+  height: 60px;
+  background: rgba(15, 23, 42, 0.9);
+  border: 1px solid rgba(59, 130, 246, 0.4);
+  border-radius: 16px;
   color: #ffffff;
   margin-bottom: 16px;
-  box-shadow: 0 8px 16px -4px rgba(59, 130, 246, 0.4);
+  box-shadow: 0 0 20px rgba(56, 189, 248, 0.25);
 }
 
 .login-header h2 {
-  font-size: 1.5rem;
-  font-weight: 700;
+  font-size: 1.75rem;
+  font-weight: 800;
   color: #ffffff;
   margin: 0 0 6px 0;
-  letter-spacing: -0.02em;
+  letter-spacing: 0.08em;
 }
 
 .subtitle {

@@ -101,16 +101,15 @@ class AuthRbacTests(APITestCase):
         post_resp = self.client.post(self.rules_url, {
             'dst_prefix': '192.0.2.1/32',
             'action': 'Drop',
-            'is_active': True
         })
         self.assertEqual(post_resp.status_code, status.HTTP_403_FORBIDDEN)
 
-        # Toggle action should be rejected with 403 Forbidden
-        toggle_resp = self.client.post(f"{self.rules_url}{self.sample_rule.id}/toggle/")
-        self.assertEqual(toggle_resp.status_code, status.HTTP_403_FORBIDDEN)
+        # DELETE should be rejected with 403 Forbidden
+        del_resp = self.client.delete(f"{self.rules_url}{self.sample_rule.id}/")
+        self.assertEqual(del_resp.status_code, status.HTTP_403_FORBIDDEN)
 
     def test_operator_role_can_manage_flowspec_rules(self):
-        """Operator can create, toggle, update, and delete rules, but cannot alter peers."""
+        """Operator can create, update, and delete rules, but cannot alter peers."""
         self.client.force_authenticate(user=self.operator_user)
 
         # Create rule
@@ -119,14 +118,16 @@ class AuthRbacTests(APITestCase):
             'addr_fam': 'IPv4',
             'dst_prefix': '203.0.113.50/32',
             'action': 'Drop',
-            'is_active': True
         })
         self.assertEqual(create_resp.status_code, status.HTTP_201_CREATED)
         new_rule_id = create_resp.data['id']
 
-        # Toggle rule
-        toggle_resp = self.client.post(f"{self.rules_url}{new_rule_id}/toggle/")
-        self.assertEqual(toggle_resp.status_code, status.HTTP_200_OK)
+        # Update rule
+        update_resp = self.client.patch(f"{self.rules_url}{new_rule_id}/", {
+            'description': 'Updated by operator'
+        })
+        self.assertEqual(update_resp.status_code, status.HTTP_200_OK)
+        self.assertEqual(update_resp.data['description'], 'Updated by operator')
 
         # Delete rule
         del_resp = self.client.delete(f"{self.rules_url}{new_rule_id}/")

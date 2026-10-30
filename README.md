@@ -81,7 +81,9 @@ flowchart TD
             R3["Data Center Gateways"]
         end
         subgraph TestLab["Local Development & Testing Lab"]
-            BIRD["BIRD 3.2.3 Router<br/>(Simulated Peer for Automated Tests)"]
+            BIRD_E["BIRD 3 eBGP Router<br/>(10.100.0.20, AS 65001)"]
+            BIRD_I1["BIRD 3 iBGP Core 1<br/>(10.100.0.30, AS 65000)"]
+            BIRD_I2["BIRD 3 iBGP Core 2<br/>(10.100.0.40, AS 65000)"]
         end
     end
 
@@ -93,13 +95,18 @@ flowchart TD
     RoutingSvc --> BgpManager
     BgpManager <-->|gRPC :50051| GoBGP
     GoBGP -.->|Production: iBGP / eBGP TCP 179| Production
-    GoBGP <-->|Test Lab: eBGP TCP 179| BIRD
+    GoBGP <-->|Test Lab: eBGP TCP 179| BIRD_E
+    GoBGP <-->|Test Lab: iBGP TCP 179| BIRD_I1
+    GoBGP <-->|Test Lab: iBGP TCP 179| BIRD_I2
 ```
 
 ### Production Deployment vs. Local Test Lab
 
-* **In Production**: GoBGP functions as the centralized BGP Route Server / Route Reflector. It establishes BGP sessions using either **eBGP or iBGP** directly with the operator's actual network routers (Cisco, Juniper, Nokia, Arista, etc.) across the backbone, transit edges, and data center perimeters. When an operator triggers a Flowspec filter or an RTBH blackhole, GoBGP advertises the update across these BGP sessions, directing the physical routers to drop or rate-limit traffic at line rate.
-* **In the Local Test Lab**: To allow continuous automated testing without requiring physical network hardware, a containerized **BIRD 3.2.3** router is provided as a simulated peer. The automated integration test suite (`make test-integration`) pushes routes to GoBGP and queries BIRD 3 over eBGP to confirm that Flowspec rules (`t_flow4`) and RTBH routes (`t_unicast4`) are correctly received and installed as `RTD_BLACKHOLE`.
+* **In Production**: GoBGP functions as the centralized BGP Route Server. It establishes BGP sessions using either **eBGP or iBGP** directly with the operator's actual network routers (Cisco, Juniper, Nokia, Arista, etc.) across the backbone, transit edges, and data center perimeters. When an operator triggers a Flowspec filter or an RTBH blackhole, GoBGP advertises the update across these BGP sessions, directing the physical routers to drop or rate-limit traffic at line rate.
+* **In the Local Test Lab**: To allow continuous automated testing without requiring physical network hardware, **3 containerized BIRD 3 routers** emulate a realistic multi-peer network:
+  * **1x eBGP Edge Peer (`bgpweb-bird`)**: AS 65001 @ `10.100.0.20`
+  * **2x iBGP Core Peers (`bgpweb-bird-ibgp1`, `bgpweb-bird-ibgp2`)**: AS 65000 @ `10.100.0.30` and `10.100.0.40`
+  * **Resource Efficiency**: BIRD 3 is exceptionally lightweight (written in C), with each container consuming only ~3–4 MB of RAM (total ~11 MB across all 3 routers), having zero impact on developer machines while validating multi-peer eBGP and iBGP distribution simultaneously. The automated integration test suite (`make test-integration`) verifies that Flowspec rules (`t_flow4`) and RTBH routes (`t_unicast4`) propagate and withdraw synchronously across all three peer routers.
 
 ### The Hierarchical Routing Model
 
@@ -137,9 +144,23 @@ To prevent accidental route injection and maintain strict operational control ov
 * Backwards compatible `.fslib` JSON import/export commands (`import_fslib` and `export_fslib`).
 
 ### 4. Primary BGP Stack & Multi-Vendor Peering
-* **GoBGP (Primary Production BGP Stack)**: GoBGP v3 is the first and primary BGP stack supported to interface with the operator's routers. It provides high-performance gRPC control, robust multi-AFI/SAFI routing tables, and acts as the Route Server / Route Reflector establishing iBGP or eBGP peering sessions with the network devices.
+* **GoBGP (Primary Production BGP Stack)**: GoBGP v3 is the first and primary BGP stack supported to interface with the operator's routers. It provides high-performance gRPC control, robust multi-AFI/SAFI routing tables, and acts as the Route Server establishing iBGP or eBGP peering sessions with the network devices.
 * **BIRD 3 (Testing & Lab Emulation)**: BIRD 3 is included in the local environment specifically for testing and CI/CD validation. It simulates a peer router, verifying that advertised Flowspec rules and RTBH blackholes are received and applied as `RTD_BLACKHOLE` in external routing tables.
 * **Extensible Driver Architecture**: The application interfaces with the routing daemon through the `BaseBgpBackend` abstraction layer, allowing future direct integration with alternative BGP engines (such as native BIRD, FRRouting, or ExaBGP) without touching frontend or API layers.
+
+### 5. Backbone BGP Session Management & Continuous Reconciliation
+* **Unified Single-View Dashboard**: A consolidated, single-table view displaying both database-configured BGP neighbors and live runtime-discovered sessions without disjoint UI tables.
+* **Continuous Synchronization**: Automated background reconciliation loop (5-second reactive UI polling and background daemon task `run_peer_syncer`) keeping PostgreSQL intent and GoBGP memory continuously aligned.
+* **Explicit Approval Workflow (Option 1)**: Discovered unmanaged peering sessions appear seamlessly alongside managed peers with a distinct `Discovered (Unmanaged)` badge, allowing operators to adopt them into persistent database configuration with 1-click.
+* **Filter Tabs & Real-Time Search**: Quick filter tabs (`All Sessions`, `Managed`, `Discovered`, `Established`) with dynamic count badges and search filtering across IP addresses, ASNs, and names.
+* **Dual Transport (IPv4 & IPv6)**: Supports IPv4 and IPv6 transport protocols for all peering sessions.
+* **Automatic Session Type Inference**: Dynamically identifies internal (`iBGP`) vs. external (`eBGP`) sessions based on the speaker's Local ASN and remote peer ASN.
+* **eBGP Multi-Hop Support**: Configurable IP TTL (1–255) for sessions spanning multiple IP hops, firewalls, or loopback interfaces.
+* **TCP MD5 Authentication (RFC 2385)**: Optional cryptographic MD5 signature protection on TCP peering sockets.
+* **Per-Peer Address Families**: Granular AFI/SAFI negotiation (`ipv4-unicast`, `ipv6-unicast`, `ipv4-flowspec`, `ipv6-flowspec`).
+* **Session Lifecycle & Soft Reset (RFC 2918)**: Trigger on-demand soft route refreshes without session drop, alongside real-time FSM state tracking (`ESTABLISHED`, `ACTIVE`, `IDLE`) and prefix exchange telemetry.
+* **Interactive Session Inspector**: Clicking any row reveals detailed session metrics: uptime, message counters (Rx/Tx), prefix exchange counters (Recv/Acc/Adv), and transport timers.
+* **Persistent Configuration Synchronization**: Automatically writes runtime changes to GoBGP's static configuration (`configs/gobgp.yaml`) to ensure seamless restarts without configuration loss.
 
 ---
 
@@ -154,7 +175,7 @@ To prevent accidental route injection and maintain strict operational control ov
 git clone https://github.com/Pragma-Innovation/bgpWebRouteServer.git
 cd bgpWebRouteServer
 
-# Build and start all 5 containers (DB, Backend, Frontend, GoBGP, BIRD 3)
+# Build and start all 7 containers (DB, Backend, Frontend, GoBGP, 3x BIRD)
 make lab-up
 ```
 
@@ -165,7 +186,9 @@ make lab-up
 | **Django API** | `http://localhost:8000/api/v1/` | JWT or Session auth | REST API root |
 | **Django Admin** | `http://localhost:8000/admin/` | `admin` / `admin123` | System management & users |
 | **GoBGP gRPC** | `localhost:50051` | Open | GoBGP management API |
-| **BGP Peering** | `10.100.0.10` / `10.100.0.20` | Port 179 | GoBGP $\leftrightarrow$ BIRD 3 eBGP session |
+| **eBGP Peering** | `10.100.0.10` $\leftrightarrow$ `10.100.0.20` | Port 179 | GoBGP (AS 65000) $\leftrightarrow$ BIRD eBGP (AS 65001) |
+| **iBGP Peering 1**| `10.100.0.10` $\leftrightarrow$ `10.100.0.30` | Port 179 | GoBGP (AS 65000) $\leftrightarrow$ BIRD iBGP Core 1 (AS 65000) |
+| **iBGP Peering 2**| `10.100.0.10` $\leftrightarrow$ `10.100.0.40` | Port 179 | GoBGP (AS 65000) $\leftrightarrow$ BIRD iBGP Core 2 (AS 65000) |
 
 ### Role-Based Access Control (RBAC)
 The application includes three pre-configured roles:

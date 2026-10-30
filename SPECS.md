@@ -136,6 +136,32 @@ erDiagram
         text last_error
         timestamp updated_at
     }
+
+    BgpGlobalConfig {
+        bigint id PK
+        bigint local_as "1 to 4294967295"
+        varchar router_id "IPv4 address"
+        integer listen_port "Default 179"
+        timestamp updated_at
+    }
+
+    BgpPeerConfig {
+        bigint id PK
+        varchar neighbor_address UK "IPv4 or IPv6"
+        smallint ip_version "4 or 6 (auto-inferred)"
+        bigint peer_as "Remote ASN"
+        varchar description
+        boolean is_enabled "Session enabled toggle"
+        boolean multihop_enabled "eBGP Multi-Hop toggle"
+        smallint multihop_ttl "1 to 255 (default 64)"
+        varchar md5_password "TCP MD5 authentication"
+        boolean passive_mode "Listen only mode"
+        integer hold_time "Hold timer in sec (default 90)"
+        integer keepalive_interval "Keepalive in sec (default 30)"
+        jsonb families "['ipv4-unicast', 'ipv4-flowspec', ...]"
+        timestamp created_at
+        timestamp updated_at
+    }
 ```
 
 ### 2.2 Model Specifications & Invariants
@@ -184,6 +210,31 @@ erDiagram
   * `WITHDRAWN`: Revoked from daemon Loc-RIB.
   * `ERROR`: Injection or withdrawal failed (see `last_error`).
 
+#### F. `BgpGlobalConfig` (`apps.peers.models.BgpGlobalConfig`)
+* **Purpose:** Singleton configuration defining the local BGP router parameters, local ASN, Router ID, and listening port.
+* **Singleton Invariant:** Exactly one active global configuration row exists (`get_solo()`). If uninitialized, sensible defaults (`AS65000`, `10.100.0.10`, port `179`) are populated.
+* **Fields & Validations:**
+  * `local_as`: Local Autonomous System Number (1 to 4294967295).
+  * `router_id`: IPv4 address identifying the BGP speaker.
+  * `listen_port`: TCP port for incoming peering connections (default 179).
+
+#### G. `BgpPeerConfig` (`apps.peers.models.BgpPeerConfig`)
+* **Purpose:** Configuration and policy definition for individual BGP peering sessions with user backbone routers or test lab stacks.
+* **Fields & Invariants:**
+  * `neighbor_address`: IPv4 or IPv6 IP address of the remote router (unique).
+  * `ip_version`: Inferred automatically (4 or 6) from `neighbor_address` using Python `ipaddress`.
+  * `peer_as`: Remote Autonomous System Number (1 to 4294967295).
+  * `session_type`: Computed property (`iBGP` if `peer_as == local_as`, else `eBGP`).
+  * `is_enabled`: Administrative status toggle.
+  * `multihop_enabled`: Boolean enabling eBGP Multi-Hop.
+  * `multihop_ttl`: TTL value for eBGP multi-hop sessions (default 64, range 1–255).
+  * `md5_password`: Optional TCP MD5 authentication password (RFC 2385).
+  * `passive_mode`: Listen-only mode without initiating outgoing TCP connections.
+  * `hold_time`: BGP Hold Time timer in seconds (default: 90).
+  * `keepalive_interval`: BGP Keepalive timer in seconds (default: 30).
+  * `families`: Array of enabled AFI/SAFIs (`['ipv4-unicast', 'ipv4-flowspec', ...]`).
+* **Synchronized Lifecycle:** Any change via REST API or Django admin automatically syncs live into the active BGP backend (GoBGP) and re-generates the static configuration file (`configs/gobgp.yaml`).
+
 ---
 
 ## 3. Network Protocol & RFC Specifications
@@ -209,9 +260,12 @@ The platform formats Flowspec NLRIs into standard extended communities:
   When BIRD receives an update with community `(65535, 666)`, its import filter sets:
   ```text
   dest = RTD_BLACKHOLE;
-  accept;
   ```
-  Verified via: `birdc show route table t_unicast4 all`.
+
+### 3.3 eBGP Multi-Hop & TCP Authentication (RFC 5492 / RFC 2385)
+* **eBGP Multi-Hop:** By default, eBGP requires peers to be directly connected (IP TTL = 1). When `multihop_enabled=true`, Gabu configures the IP TTL to `multihop_ttl` (1 to 255), allowing peering across loopback addresses, firewalls, and routed networks.
+* **TCP MD5 Authentication:** Enforces RFC 2385 TCP MD5 signature option using `md5_password` on peering TCP sessions.
+* **Dynamic Route Refresh (RFC 2918):** Supports soft reset without session drop via BGP Route Refresh messages.
 
 ---
 
@@ -235,6 +289,65 @@ class BaseBgpBackend(ABC):
     def add_flowspec_rule(self, rule: FlowspecRule) -> bool:
         """Inject a Flowspec NLRI into the BGP stack."""
         pass
+
+    @abstractmethod
+    def delete_flowspec_rule(self, rule: FlowspecRule) -> bool:
+        """Withdraw a Flowspec NLRI from the BGP stack."""
+        pass
+
+    @abstractmethod
+    def add_unicast_route(
+        self,
+        prefix: str,
+        afi_safi: str = "ipv4-unicast",
+        next_hop: str = None,
+        communities: List[str] = None,
+        attributes: Dict[str, Any] = None
+    ) -> bool:
+        """Inject a Unicast route (e.g. RTBH) with communities and next-hop."""
+        pass
+
+    @abstractmethod
+    def delete_unicast_route(
+        self,
+        prefix: str,
+        afi_safi: str = "ipv4-unicast",
+        next_hop: str = None,
+        communities: List[str] = None
+    ) -> bool:
+        """Withdraw a Unicast route from the BGP stack."""
+        pass
+
+    @abstractmethod
+    def add_peer(self, peer: Any) -> bool:
+        """Dynamically add or configure a BGP neighbor in the running daemon."""
+        pass
+
+    @abstractmethod
+    def update_peer(self, peer: Any) -> bool:
+        """Update an existing BGP neighbor configuration."""
+        pass
+
+    @abstractmethod
+    def delete_peer(self, address: str) -> bool:
+        """Remove a BGP neighbor and tear down its session."""
+        pass
+
+    @abstractmethod
+    def reset_peer(self, address: str, soft: bool = True) -> bool:
+        """Trigger soft (RFC 2918 route refresh) or hard reset."""
+        pass
+
+    @abstractmethod
+    def sync_all_peers(self) -> Dict[str, Any]:
+        """Synchronize all database peer configurations with daemon memory."""
+        pass
+```
+
+### 4.1 GoBGP Backend & Static Configuration Writer
+The GoBGP driver (`apps/bgp_engine/backends/gobgp/`) leverages GoBGP's gRPC API and CLI for runtime operations, paired with `GoBgpConfigWriter` (`apps/bgp_engine/backends/gobgp/config_writer.py`) for configuration persistence:
+* **Runtime Sync:** `add_peer`, `update_peer`, and `delete_peer` manipulate active sessions via GoBGP gRPC / CLI.
+* **YAML Synchronization:** Every configuration mutation invokes `GoBgpConfigWriter.sync_to_file()`, regenerating `configs/gobgp.yaml` to ensure daemon restarts retain all peer configurations and address families without external YAML library dependencies.
 
     @abstractmethod
     def delete_flowspec_rule(self, rule: FlowspecRule) -> bool:
@@ -357,6 +470,23 @@ sequenceDiagram
     API-->>Operator: HTTP 200 OK (Pushed Summary)
 ```
 
+### 5.3 Peer Reconciliation Service & Continuous Synchronization
+Located at `apps/peers/services.py` (`PeerReconciliationService`) and management command `apps/peers/management/commands/run_peer_syncer.py`.
+
+* **Unified State Consolidation (`get_unified_sessions`):**
+  Correlates Gabu's desired configuration in PostgreSQL (`BgpPeerConfig`) with live runtime neighbors discovered from the active BGP backend (GoBGP):
+  * **Managed Sessions (`origin: 'managed'`):** Defined in the database. Sync status is computed as `in_sync` (FSM Established), `connecting` (Active/Idle), `drift` (remote ASN mismatch), or `disabled` (administratively disabled).
+  * **Discovered Sessions (`origin: 'discovered'`):** Active in daemon memory but unmanaged in Gabu's database. Displayed in the unified view with status `discovered`, ready for explicit adoption.
+* **Active Reconciliation (`reconcile`):**
+  Pushes any enabled database-configured peers missing from GoBGP runtime memory directly into the daemon, and triggers `GoBgpConfigWriter.sync_to_file()` to regenerate `configs/gobgp.yaml`.
+* **Background Syncer Daemon (`run_peer_syncer`):**
+  ```bash
+  python manage.py run_peer_syncer [--interval SECONDS] [--once]
+  ```
+  Runs as an automated background loop or one-off verification, reporting synchronization cycles and reconciling state without human intervention.
+* **Explicit Approval Workflow (Option 1):**
+  Discovered unmanaged neighbors are prominently highlighted with action **"Adopt to DB"**, allowing operators to review parameters, assign address families, and persist the session into PostgreSQL with 1-click.
+
 ---
 
 ## 6. REST API Contract & Endpoints
@@ -391,7 +521,18 @@ All API endpoints are prefixed with `/api/v1/` and return `application/json`.
 | `GET` | `/routing/ribs/` | List Master RIBs | None | Viewer |
 | `POST` | `/routing/ribs/{id}/push/` | Push Master RIB to BGP | None | Operator |
 | `GET` | `/routing/announcements/` | Loc-RIB announcements | `?afi_safi=`, `?pseudo_rib=`, `?status=`, `?search=` | Viewer |
-| `GET` | `/peers/` | List BGP neighbors | None | Viewer |
+| `GET` | `/peers/global/` | Get global BGP router config | None | Viewer |
+| `PATCH/PUT`| `/peers/global/` | Update local ASN, router ID, port | Global config payload | Admin |
+| `GET` | `/peers/peers/` | List configured BGP neighbors | None | Viewer |
+| `POST` | `/peers/peers/` | Configure new BGP neighbor | Neighbor IP, ASN, multihop, MD5 | Admin |
+| `PATCH/PUT`| `/peers/peers/{id}/` | Update neighbor configuration | Partial neighbor config payload | Admin |
+| `DELETE`| `/peers/peers/{id}/` | Remove neighbor & teardown | None | Admin |
+| `POST` | `/peers/peers/{id}/reset/` | Trigger soft/hard BGP reset | `{"soft": true}` | Admin |
+| `POST` | `/peers/peers/sync/` | Sync all peers to GoBGP | None | Admin |
+| `GET` | `/peers/peers/sessions/` | Unified single view of all BGP sessions | None | Viewer |
+| `POST` | `/peers/peers/reconcile/`| Active continuous reconciliation | None | Admin |
+| `POST` | `/peers/peers/adopt/` | Adopt discovered peer into DB | Neighbor IP, ASN, multihop, MD5 | Admin |
+| `GET` | `/bgp/neighbors/` | Live daemon BGP sessions | None | Viewer |
 | `GET` | `/bgp/status/` | Live daemon status | None | Viewer |
 
 ---
@@ -403,16 +544,23 @@ Built with **Vue 3**, **Vite**, **Pinia**, and **TypeScript**.
 ### 7.1 Pinia Store Directory
 * **`prefixStore.ts`**: Manages `prefixes`, `totalCount`, `currentPage`, `pageSize`, `importFromAsn()`, `createPrefix()`, and `deletePrefix()`.
 * **`routingStore.ts`**: Manages `ribs`, `pseudoRibs`, `announcements`, `pushRibToBgp()`, `addPrefixToPseudoRib()`, and `triggerQuickBlackhole()`.
-* **`flowspecStore.ts`**: Manages Flowspec CRUD, active rule toggles, and modal states.
-* **`peersStore.ts`**: Streams BGP neighbor states, FSM statuses, and prefix counters.
-* **`authStore.ts`**: Manages JWT lifecycle, user roles (`canEdit`), and session expiration.
+* **`flowspecStore.ts`**: Manages Flowspec rule asset CRUD and modal states.
+* **`bgpStore.ts`**: Streams BGP neighbor states, FSM statuses, prefix counters, global router config (`fetchGlobalConfig`, `updateGlobalConfig`), peer session configurations (`createPeerConfig`, `updatePeerConfig`, `deletePeerConfig`, `resetPeer`), unified sessions (`fetchSessions`), reconciliation (`reconcilePeers`), and 1-click adoption (`adoptPeer`).
+* **`authStore.ts`**: Manages JWT lifecycle, user roles (`canEdit`, `isAdmin`), and session expiration.
 
-### 7.2 UI Views
+### 7.2 UI Views & Modals
 * **`PrefixInventoryView.vue`**: Unified table for IPv4 and IPv6 assets. Features server-side pagination, instant family filtering (`ALL`, `IPv4 Only`, `IPv6 Only`), 1-click RTBH modal, and RIPEstat ASN import dialog with dual v4/v6 checkboxes.
-* **`FlowspecView.vue`**: Rule management table, RFC action chips, and interactive `RuleBuilderModal.vue`.
+* **`FlowspecView.vue`**: Flowspec rule asset inventory table displaying L3/L4 match criteria (source/dest prefixes, ports, protocols, flags, DSCP) and RFC action tags, paired with `RuleBuilderModal.vue`. In accordance with Invariant 1 (3-Tier Routing Hierarchy), Flowspec rules are managed as route assets without direct BGP injection toggles or container coupling; association with policy containers is managed within Pseudo-RIBs and announced via Master RIB push.
 * **`RoutingWorkflowView.vue`**: Master orchestration view managing the creation of Pseudo-RIBs, asset assignment, Master RIB grouping, and the "Push to GoBGP" command.
 * **`AnnouncementsView.vue`**: Live Loc-RIB table displaying all routes programmed into the router with multi-AFI filters.
-* **`PeersView.vue`**: Visual peer cards showing BGP state (Established, Active, Idle), remote ASN, and prefix counters.
+* **`PeersView.vue`**: Unified single-view BGP session dashboard consolidating database-managed configurations and live runtime-discovered BGP sessions into a single view. Features:
+  * Filter tabs (`All Sessions`, `Managed`, `Discovered`, `Established`) with dynamic count badges and search filtering.
+  * Distinct badges for origin (`Managed` vs `Discovered (Unmanaged)`) and synchronization state (`in_sync`, `discovered`, `drift`, `connecting`, `offline`, `disabled`).
+  * Continuous 5-second background synchronization polling with animated live status pulse indicator.
+  * 1-click "Adopt to DB" workflow for discovered unmanaged peers.
+  * Interactive row selection with the **Peer Session Inspector** drawer displaying session uptime, message counters (Rx/Tx), prefix exchange metrics (Recv/Acc/Adv), and transport timers.
+* **`GlobalConfigModal.vue`**: Admin modal to configure Local ASN, Router ID, and Listen Port.
+* **`PeerModal.vue`**: Admin modal to add, edit, or adopt BGP peers with automatic session type detection (iBGP vs eBGP), multi-hop TTL, MD5 password entry, and multi-family selection (`ipv4-unicast`, `ipv6-unicast`, `ipv4-flowspec`, `ipv6-flowspec`).
 
 ---
 
@@ -426,17 +574,20 @@ The repository provides automated test suites ensuring zero regressions across p
 * **API Permission Tests**: Enforces RBAC permissions across all endpoints.
 * **Flowspec Validation Tests**: Ensures invalid L3/L4 match criteria are rejected with HTTP 400.
 
-### 8.2 End-to-End eBGP Integration Test (`make test-integration`)
-Executes `tests/integration/test_ebgp_flowspec_propagation.py` against live containers:
+### 8.2 End-to-End Multi-Peer Integration Test (`make test-integration`)
+Executes `tests/integration/test_ebgp_flowspec_propagation.py` against live containers across a 3-router BIRD test lab (1x eBGP and 2x iBGP):
 
-1. **Verify Session**: Confirms GoBGP (10.100.0.10) $\leftrightarrow$ BIRD 3 (10.100.0.20) is `Established`.
+1. **Verify Sessions**: Confirms BGP sessions between GoBGP (`10.100.0.10`, AS 65000) and all 3 BIRD routers are `Established`:
+   * `bgpweb-bird`: eBGP (AS 65001 @ `10.100.0.20`)
+   * `bgpweb-bird-ibgp1`: iBGP Core 1 (AS 65000 @ `10.100.0.30`)
+   * `bgpweb-bird-ibgp2`: iBGP Core 2 (AS 65000 @ `10.100.0.40`)
 2. **Authenticate**: Obtains JWT token for user `operator`.
 3. **Create Assets**: Injects `198.51.100.77/32` (Prefix) and `198.51.100.222/32 port 22 -> Drop` (Flowspec).
 4. **Attach to Policy**: Associates Prefix with RTBH Pseudo-RIB (`65535:666`, Next-Hop: `192.0.2.1`) and Flowspec with Edge Pseudo-RIB.
 5. **Push Master RIB**: Triggers push to GoBGP.
-6. **Verify GoBGP Loc-RIB**: Verifies both NLRIs are present via `gobgp` CLI.
-7. **Verify BIRD 3 Route Tables**:
-   * Inspects `t_unicast4`: Verifies `198.51.100.77/32` is installed as `RTD_BLACKHOLE`.
-   * Inspects `t_flow4`: Verifies Flowspec rule is active with discard extended community.
-8. **Withdrawal**: Detaches assets and triggers push reconciliation.
-9. **Verify Route Purge**: Confirms routes are cleanly purged from BIRD 3 routing tables.
+6. **Verify GoBGP Loc-RIB**: Verifies both NLRIs are present in GoBGP via `gobgp` CLI.
+7. **Verify BIRD 3 Route Tables across All 3 Routers**:
+   * Inspects `t_unicast4`: Verifies `198.51.100.77/32` is installed as `RTD_BLACKHOLE` in `bgpweb-bird`, `bgpweb-bird-ibgp1`, and `bgpweb-bird-ibgp2`.
+   * Inspects `t_flow4`: Verifies Flowspec rule is active with discard extended community in all 3 routers.
+8. **Withdrawal**: Detaches assets from Pseudo-RIBs and triggers push reconciliation.
+9. **Verify Route Purge**: Confirms routes are cleanly purged from unicast and flow tables across all 3 routers.

@@ -129,3 +129,36 @@ class MockBgpBackend(BaseBgpBackend):
             logger.info(f"[MockBgpBackend] Withdrew Unicast route {key}")
             return True
         return False
+
+    def add_peer(self, peer: Any) -> bool:
+        addr = getattr(peer, "neighbor_address", str(peer.get("neighbor_address", "")))
+        peer_as = getattr(peer, "peer_as", peer.get("peer_as", 65001))
+        desc = getattr(peer, "description", peer.get("description", ""))
+        self._mock_neighbors = [p for p in self._mock_neighbors if p["neighbor_address"] != addr]
+        self._mock_neighbors.append({
+            "neighbor_address": addr,
+            "peer_as": peer_as,
+            "state": "ESTABLISHED",
+            "uptime": "00:01:00",
+            "prefixes_received": 0,
+            "prefixes_accepted": 0,
+            "prefixes_advertised": 0,
+            "description": desc or "Mock Peer",
+        })
+        logger.info(f"[MockBgpBackend] Added peer {addr} AS{peer_as}")
+        return True
+
+    def delete_peer(self, neighbor_address: str) -> bool:
+        self._mock_neighbors = [p for p in self._mock_neighbors if p["neighbor_address"] != neighbor_address]
+        logger.info(f"[MockBgpBackend] Deleted peer {neighbor_address}")
+        return True
+
+    def update_peer(self, peer: Any) -> bool:
+        return self.add_peer(peer)
+
+    def reset_peer(self, neighbor_address: str, soft: bool = True) -> bool:
+        logger.info(f"[MockBgpBackend] Reset peer {neighbor_address} (soft={soft})")
+        return True
+
+    def sync_all_peers(self) -> Dict[str, Any]:
+        return {"total_peers": len(self._mock_neighbors), "synced": len(self._mock_neighbors)}

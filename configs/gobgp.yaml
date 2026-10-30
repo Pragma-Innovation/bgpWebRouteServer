@@ -8,6 +8,39 @@ neighbors:
   - config:
       neighbor-address: 10.100.0.20
       peer-as: 65001
+      description: "eBGP Backbone Edge Router (BIRD eBGP)"
+    ebgp-multihop:
+      config:
+        enabled: true
+        multihop-ttl: 255
+    afi-safis:
+      - config:
+          afi-safi-name: ipv4-flowspec
+      - config:
+          afi-safi-name: ipv6-flowspec
+      - config:
+          afi-safi-name: ipv4-unicast
+      - config:
+          afi-safi-name: ipv6-unicast
+
+  - config:
+      neighbor-address: 10.100.0.30
+      peer-as: 65000
+      description: "iBGP Core Router 1 (BIRD iBGP1)"
+    afi-safis:
+      - config:
+          afi-safi-name: ipv4-flowspec
+      - config:
+          afi-safi-name: ipv6-flowspec
+      - config:
+          afi-safi-name: ipv4-unicast
+      - config:
+          afi-safi-name: ipv6-unicast
+
+  - config:
+      neighbor-address: 10.100.0.40
+      peer-as: 65000
+      description: "iBGP Core Router 2 (BIRD iBGP2)"
     afi-safis:
       - config:
           afi-safi-name: ipv4-flowspec

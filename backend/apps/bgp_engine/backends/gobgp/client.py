@@ -165,6 +165,15 @@ class GoBgpClient:
                 session_state_num = state.get("session_state", 0)
                 state_str = state_map.get(session_state_num, "ACTIVE")
 
+                prefixes_recv = 0
+                prefixes_accepted = 0
+                prefixes_adv = 0
+                for af in p.get("afi_safis", []):
+                    af_state = af.get("state", {})
+                    prefixes_recv += af_state.get("prefixes", {}).get("received", 0)
+                    prefixes_accepted += af_state.get("prefixes", {}).get("accepted", 0)
+                    prefixes_adv += af_state.get("prefixes", {}).get("advertised", 0)
+
                 peers.append({
                     "neighbor_address": conf.get("neighbor_address", ""),
                     "peer_as": conf.get("peer_as", 0),
@@ -174,6 +183,9 @@ class GoBgpClient:
                     "uptime": timers.get("state", {}).get("uptime", {}).get("seconds", 0),
                     "messages_received": state.get("messages", {}).get("received", {}).get("total", 0),
                     "messages_sent": state.get("messages", {}).get("sent", {}).get("total", 0),
+                    "prefixes_received": prefixes_recv,
+                    "prefixes_accepted": prefixes_accepted,
+                    "prefixes_advertised": prefixes_adv,
                     "description": conf.get("description", "BGP Peer"),
                 })
         except Exception as e:
@@ -347,6 +359,101 @@ class GoBgpClient:
             return []
 
         try:
-            return json.loads(raw_json)
+            data = json.loads(raw_json)
+            if isinstance(data, dict):
+                routes = []
+                for prefix_key, paths in data.items():
+                    if isinstance(paths, list):
+                        for p in paths:
+                            if isinstance(p, dict):
+                                item = dict(p)
+                                item["prefix"] = prefix_key
+                                routes.append(item)
+                            else:
+                                routes.append({"prefix": prefix_key, "data": p})
+                    else:
+                        routes.append({"prefix": prefix_key, "data": paths})
+                return routes
+            elif isinstance(data, list):
+                return data
+            return []
         except Exception:
             return []
+
+    def add_peer(self, peer: Any) -> bool:
+        """Dynamically add or replace a BGP neighbor in the running GoBGP daemon."""
+        from .config_writer import GoBgpConfigWriter
+
+        if isinstance(peer, dict):
+            neighbor_addr = str(peer.get("neighbor_address", ""))
+            peer_as = peer.get("peer_as", 0)
+            multihop = peer.get("multihop_enabled", False)
+            multihop_ttl = peer.get("multihop_ttl", 255) or 255
+            families = peer.get("families", [])
+            session_type = peer.get("session_type", "")
+        else:
+            neighbor_addr = str(getattr(peer, "neighbor_address", ""))
+            peer_as = getattr(peer, "peer_as", 0)
+            multihop = getattr(peer, "multihop_enabled", False)
+            multihop_ttl = getattr(peer, "multihop_ttl", 255) or 255
+            families = getattr(peer, "families", [])
+            session_type = getattr(peer, "session_type", "")
+
+        # First remove if already present in runtime
+        self._run_gobgp(["neighbor", "del", neighbor_addr])
+
+        cmd = ["neighbor", "add", neighbor_addr, "as", str(peer_as)]
+        if multihop or session_type == "eBGP":
+            cmd.extend(["ebgp-multihop-ttl", str(multihop_ttl)])
+        if families:
+            cmd.extend(["family", ",".join(families)])
+
+        res = self._run_gobgp(cmd)
+        GoBgpConfigWriter.sync_to_file()
+
+        if res is not None:
+            logger.info(f"[GoBgpClient] Successfully added BGP peer {neighbor_addr} (AS{peer_as})")
+            return True
+        logger.error(f"[GoBgpClient] Failed to add BGP peer {neighbor_addr} with args: {cmd}")
+        return False
+
+    def delete_peer(self, neighbor_address: str) -> bool:
+        """Remove a BGP neighbor from the running GoBGP daemon."""
+        from .config_writer import GoBgpConfigWriter
+
+        res = self._run_gobgp(["neighbor", "del", neighbor_address])
+        GoBgpConfigWriter.sync_to_file()
+        if res is not None:
+            logger.info(f"[GoBgpClient] Successfully deleted BGP peer {neighbor_address}")
+            return True
+        logger.error(f"[GoBgpClient] Failed to delete BGP peer {neighbor_address}")
+        return False
+
+    def update_peer(self, peer: Any) -> bool:
+        """Update an existing BGP neighbor."""
+        return self.add_peer(peer)
+
+    def reset_peer(self, neighbor_address: str, soft: bool = True) -> bool:
+        """Trigger soft or hard session reset for a BGP neighbor."""
+        if soft:
+            res = self._run_gobgp(["neighbor", neighbor_address, "softreset"])
+        else:
+            self._run_gobgp(["neighbor", neighbor_address, "reset"])
+            time.sleep(0.5)
+            res = self._run_gobgp(["neighbor", neighbor_address, "enable"])
+
+        return res is not None
+
+    def sync_all_peers(self) -> Dict[str, Any]:
+        """Reconcile all enabled peers from the database to GoBGP and write config file."""
+        from apps.peers.models import BgpPeerConfig
+        from .config_writer import GoBgpConfigWriter
+
+        peers = BgpPeerConfig.objects.filter(is_enabled=True)
+        synced = 0
+        for peer in peers:
+            if self.add_peer(peer):
+                synced += 1
+
+        GoBgpConfigWriter.sync_to_file()
+        return {"total_peers": peers.count(), "synced": synced}

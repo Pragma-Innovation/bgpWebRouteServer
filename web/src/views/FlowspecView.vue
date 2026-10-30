@@ -2,9 +2,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useFlowspecStore } from '../stores/flowspecStore'
 import { useAuthStore } from '../stores/authStore'
-import StatusBadge from '../components/StatusBadge.vue'
 import RuleBuilderModal from '../components/RuleBuilderModal.vue'
-import { Plus, Trash2, Power, Filter, FileText } from 'lucide-vue-next'
+import { Plus, Trash2, Filter } from 'lucide-vue-next'
 
 const flowspecStore = useFlowspecStore()
 const authStore = useAuthStore()
@@ -30,7 +29,9 @@ const filteredRules = computed(() => {
     <div class="header-section">
       <div>
         <h1 class="page-title">BGP Flowspec Mitigation Rules</h1>
-        <p class="page-subtitle">Inspect, inject, and withdraw granular traffic-filtering rules (RFC 5575 / RFC 8955).</p>
+        <p class="page-subtitle">
+          Manage BGP Flowspec mitigation rule assets (RFC 5575 / RFC 8955). Attach rules to Pseudo-RIB policy profiles to announce them to peers.
+        </p>
       </div>
       <div class="header-actions">
         <button
@@ -92,8 +93,7 @@ const filteredRules = computed(() => {
             <th>Family</th>
             <th>Match Criteria</th>
             <th>Action</th>
-            <th>RIB State</th>
-            <th>Actions</th>
+            <th class="text-right">Actions</th>
           </tr>
         </thead>
         <tbody>
@@ -123,26 +123,12 @@ const filteredRules = computed(() => {
                 <span v-if="rule.action_value" class="text-xs font-mono ml-1">({{ rule.action_value }})</span>
               </span>
             </td>
-            <td>
-              <StatusBadge
-                :status="rule.is_active ? 'active' : 'inactive'"
-                :label="rule.is_active ? 'Injected' : 'Withdrawn'"
-              />
-            </td>
-            <td>
-              <div class="action-buttons">
-                <button
-                  class="btn btn-secondary btn-icon"
-                  :disabled="!authStore.canEdit"
-                  :title="!authStore.canEdit ? 'Operator or Admin role required' : (rule.is_active ? 'Withdraw from BGP' : 'Inject into BGP')"
-                  @click="flowspecStore.toggleRule(rule.id)"
-                >
-                  <Power :size="16" :class="{ 'text-green': rule.is_active, 'text-muted': !rule.is_active }" />
-                </button>
+            <td class="text-right">
+              <div class="action-buttons justify-end">
                 <button
                   class="btn btn-secondary btn-icon text-danger"
                   :disabled="!authStore.canEdit"
-                  :title="!authStore.canEdit ? 'Operator or Admin role required' : 'Delete rule'"
+                  :title="!authStore.canEdit ? 'Operator or Admin role required' : 'Delete rule asset'"
                   @click="flowspecStore.deleteRule(rule.id)"
                 >
                   <Trash2 :size="16" />
@@ -236,10 +222,15 @@ const filteredRules = computed(() => {
   display: flex;
   gap: 8px;
 }
+.justify-end {
+  justify-content: flex-end;
+}
+.text-right {
+  text-align: right;
+}
 .btn-icon {
   padding: 6px;
 }
-.text-green { color: #34d399; }
 .text-danger { color: #f87171; }
 .loading-state, .empty-state {
   padding: 36px;

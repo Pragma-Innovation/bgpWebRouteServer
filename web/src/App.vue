@@ -4,6 +4,7 @@ import { RouterLink, RouterView, useRoute } from 'vue-router'
 import { useBgpStore } from './stores/bgpStore'
 import { useAuthStore } from './stores/authStore'
 import StatusBadge from './components/StatusBadge.vue'
+import GabuLogo from './components/GabuLogo.vue'
 import { LayoutDashboard, ShieldAlert, Network, Settings, Radio, User, LogOut, Database, Layers, Megaphone } from 'lucide-vue-next'
 
 const route = useRoute()
@@ -28,11 +29,11 @@ onMounted(() => {
     <aside class="sidebar">
       <div class="brand">
         <div class="brand-icon">
-          <Radio :size="20" />
+          <GabuLogo :size="24" />
         </div>
         <div class="brand-text">
-          <span class="brand-title">bgpWebRouteServer</span>
-          <span class="brand-subtitle">Gabu Reborn</span>
+          <span class="brand-title">GABU</span>
+          <span class="brand-subtitle">BGP Route Server</span>
         </div>
       </div>
 
@@ -130,31 +131,34 @@ onMounted(() => {
   border-bottom: 1px solid var(--color-surface-border);
 }
 .brand-icon {
-  width: 36px;
-  height: 36px;
-  background: linear-gradient(135deg, #3b82f6, #06b6d4);
-  border-radius: 8px;
+  width: 38px;
+  height: 38px;
+  background: rgba(15, 23, 42, 0.85);
+  border: 1px solid rgba(59, 130, 246, 0.35);
+  border-radius: 9px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #ffffff;
+  box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
 }
 .brand-text {
   display: flex;
   flex-direction: column;
 }
 .brand-title {
-  font-weight: 700;
-  font-size: 0.9375rem;
-  letter-spacing: -0.01em;
+  font-weight: 800;
+  font-size: 1.15rem;
+  letter-spacing: 0.08em;
   color: #ffffff;
+  line-height: 1.1;
 }
 .brand-subtitle {
-  font-size: 0.6875rem;
+  font-size: 0.65rem;
   color: var(--color-accent);
   font-weight: 600;
   text-transform: uppercase;
-  letter-spacing: 0.05em;
+  letter-spacing: 0.04em;
+  margin-top: 2px;
 }
 .nav-links {
   display: flex;

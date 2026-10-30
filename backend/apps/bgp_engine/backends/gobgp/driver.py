@@ -121,3 +121,18 @@ class GoBgpBackend(BaseBgpBackend):
             return False
 
         return self.client.delete_unicast_route(prefix=prefix, afi_safi=afi_safi)
+
+    def add_peer(self, peer: Any) -> bool:
+        return self.client.add_peer(peer)
+
+    def delete_peer(self, neighbor_address: str) -> bool:
+        return self.client.delete_peer(neighbor_address)
+
+    def update_peer(self, peer: Any) -> bool:
+        return self.client.update_peer(peer)
+
+    def reset_peer(self, neighbor_address: str, soft: bool = True) -> bool:
+        return self.client.reset_peer(neighbor_address, soft=soft)
+
+    def sync_all_peers(self) -> Dict[str, Any]:
+        return self.client.sync_all_peers()

@@ -99,3 +99,23 @@ class BaseBgpBackend(ABC):
         Withdraw an IPv4 or IPv6 unicast route from the BGP RIB.
         """
         return True
+
+    def add_peer(self, peer: Any) -> bool:
+        """Add or dynamically program a BGP neighbor."""
+        return True
+
+    def delete_peer(self, neighbor_address: str) -> bool:
+        """Withdraw or disconnect a BGP neighbor."""
+        return True
+
+    def update_peer(self, peer: Any) -> bool:
+        """Update parameters for an existing BGP neighbor."""
+        return True
+
+    def reset_peer(self, neighbor_address: str, soft: bool = True) -> bool:
+        """Trigger soft or hard BGP session reset."""
+        return True
+
+    def sync_all_peers(self) -> Dict[str, Any]:
+        """Synchronize all enabled peers from database with the BGP engine."""
+        return {"synced": 0}
