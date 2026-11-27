@@ -24,12 +24,17 @@ bgpWebRouteServer/
 ├── README.md                       # Project overview, dedication, and quickstart guide
 ├── SPECS.md                        # Authoritative functional & technical specifications
 ├── AGENTS.md                       # Agent operational rules & workflows (this file)
-├── docker-compose.yml              # Local compose stack (Postgres, Backend, Frontend, GoBGP, 3x BIRD)
-├── Makefile                        # Canonical operational commands
+├── docker-compose.yml              # Shared core services (db, backend, peer-syncer, gobgp, frontend)
+├── docker-compose.dev.yml          # Dev & Lab overlay (HMR, bind-mounts, demo seeds, 3x BIRD routers)
+├── docker-compose.prod.yml         # Hardened Production overlay (Nginx, Gunicorn, TCP/179, no demo data)
+├── .env.example                    # Developer environment template
+├── .env.prod.example               # Production environment template
+├── Makefile                        # Canonical operational commands (auto-detects podman vs docker)
 ├── deploy/                         # Multi-stage Dockerfiles & Kubernetes manifests
 │   ├── docker/                     # Dockerfiles (backend, frontend, bird, gobgp)
 │   └── k8s/                        # Base manifests & Kustomize overlays (dev/prod)
 ├── backend/                        # Django REST Framework backend service
+│   ├── entrypoint.sh               # Automated DB wait, migrate, RBAC/superuser & starter profile bootstrap
 │   ├── manage.py
 │   ├── requirements.txt
 │   ├── config/                     # Settings (base.py, development.py, production.py), urls, asgi
@@ -117,17 +122,20 @@ Every code change (new feature, bug fix, model change, API parameter, CLI option
 The local development environment uses rootless Podman / Docker. AI agents must execute commands inside running containers:
 
 ```bash
-# 1. Run all Django backend unit tests:
-podman exec bgpweb-backend python manage.py test apps.prefixes apps.routing apps.flowspec
+# 1. Start Developer + Multi-Peer Lab stack (auto-migrates & seeds lab):
+make dev-up
 
-# 2. Run Python contract tests via Makefile:
-make test
+# 2. Run all Django backend unit tests:
+make test-backend
 
-# 3. Run the automated eBGP integration test (propagating to GoBGP & BIRD 3):
+# 3. Run the automated eBGP + 2x iBGP integration test:
 make test-integration
 
 # 4. Verify TypeScript and compile frontend bundle:
 podman exec bgpweb-frontend npm run build
+
+# 5. Start hardened Production stack (after configuring .env from .env.prod.example):
+make prod-up
 ```
 
 ### Checking BGP Peering and Route Tables

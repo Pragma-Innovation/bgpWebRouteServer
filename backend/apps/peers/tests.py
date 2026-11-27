@@ -203,3 +203,77 @@ class BgpPeerApiTest(TestCase):
         self.assertTrue(BgpPeerConfig.objects.filter(neighbor_address='172.16.1.1').exists())
         mock_backend.add_peer.assert_called_once()
 
+
+class BootstrapAndSeedingCommandsTest(TestCase):
+    @patch('apps.bgp_engine.backends.gobgp.config_writer.GoBgpConfigWriter.sync_to_file', return_value=True)
+    @patch.dict('os.environ', {
+        'BGP_LOCAL_AS': '64555',
+        'BGP_ROUTER_ID': '192.0.2.55',
+        'BGP_LISTEN_PORT': '1179',
+    })
+    def test_bootstrap_bgp_config_from_env_when_empty(self, mock_sync):
+        from django.core.management import call_command
+        BgpGlobalConfig.objects.all().delete()
+
+        call_command('bootstrap_bgp_config')
+        cfg = BgpGlobalConfig.get_solo()
+        self.assertEqual(cfg.local_as, 64555)
+        self.assertEqual(cfg.router_id, '192.0.2.55')
+        self.assertEqual(cfg.listen_port, 1179)
+        self.assertTrue(mock_sync.called)
+
+    @patch('apps.bgp_engine.backends.gobgp.config_writer.GoBgpConfigWriter.sync_to_file', return_value=True)
+    def test_seed_dev_lab_idempotent(self, mock_sync):
+        from django.core.management import call_command
+        BgpPeerConfig.objects.all().delete()
+
+        call_command('seed_dev_lab')
+        self.assertEqual(BgpPeerConfig.objects.count(), 3)
+        self.assertTrue(BgpPeerConfig.objects.filter(neighbor_address='10.100.0.20', peer_as=65001).exists())
+        self.assertTrue(BgpPeerConfig.objects.filter(neighbor_address='10.100.0.30', peer_as=65000).exists())
+        self.assertTrue(BgpPeerConfig.objects.filter(neighbor_address='10.100.0.40', peer_as=65000).exists())
+
+        # Subsequent call without --force keeps existing peer table untouched
+        BgpPeerConfig.objects.filter(neighbor_address='10.100.0.40').delete()
+        call_command('seed_dev_lab')
+        self.assertEqual(BgpPeerConfig.objects.count(), 2)
+
+        # With --force, missing lab peer is restored
+        call_command('seed_dev_lab', force=True)
+        self.assertEqual(BgpPeerConfig.objects.count(), 3)
+
+    @patch.dict('os.environ', {
+        'DJANGO_SUPERUSER_USERNAME': 'prod_admin',
+        'DJANGO_SUPERUSER_EMAIL': 'noc@prod.local',
+        'DJANGO_SUPERUSER_PASSWORD': 'StrongProdPassword!123',
+    })
+    def test_bootstrap_roles_production_superuser_without_demo_users(self):
+        from django.core.management import call_command
+        User = get_user_model()
+
+        call_command('bootstrap_roles', ensure_superuser=True)
+        prod_admin = User.objects.filter(username='prod_admin').first()
+        self.assertIsNotNone(prod_admin)
+        self.assertTrue(prod_admin.is_superuser)
+        self.assertTrue(prod_admin.groups.filter(name='Admin').exists())
+        # Demo users must NOT be created in production mode
+        self.assertFalse(User.objects.filter(username='operator').exists())
+        self.assertFalse(User.objects.filter(username='viewer').exists())
+
+    def test_seed_default_routing_only_if_empty(self):
+        from django.core.management import call_command
+        from apps.routing.models import PseudoRib, Rib
+
+        PseudoRib.objects.all().delete()
+        Rib.objects.all().delete()
+
+        call_command('seed_default_routing', only_if_empty=True)
+        self.assertEqual(PseudoRib.objects.count(), 4)
+        self.assertEqual(Rib.objects.count(), 1)
+
+        # Delete one starter profile; subsequent --only-if-empty must NOT recreate it
+        PseudoRib.objects.filter(name='Scrubbing Center Diversion (IPv4)').delete()
+        call_command('seed_default_routing', only_if_empty=True)
+        self.assertEqual(PseudoRib.objects.count(), 3)
+
+

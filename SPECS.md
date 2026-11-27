@@ -591,3 +591,26 @@ Executes `tests/integration/test_ebgp_flowspec_propagation.py` against live cont
    * Inspects `t_flow4`: Verifies Flowspec rule is active with discard extended community in all 3 routers.
 8. **Withdrawal**: Detaches assets from Pseudo-RIBs and triggers push reconciliation.
 9. **Verify Route Purge**: Confirms routes are cleanly purged from unicast and flow tables across all 3 routers.
+
+---
+
+## 9. Deployment Modes & Automated Database Bootstrapping
+
+### 9.1 Container Entrypoint Lifecycle (`backend/entrypoint.sh`)
+Every backend container executes an idempotent initialization pipeline prior to handing over PID 1 to `gunicorn` or `runserver` (auxiliary worker containers such as `peer-syncer` set `SKIP_DB_INIT=True`):
+1. **Database Readiness Check**: Polls PostgreSQL via Django's connection layer (`WAIT_FOR_DB=True`).
+2. **Schema Migration**: Runs `python manage.py migrate --noinput`.
+3. **RBAC & Account Bootstrap (`bootstrap_roles`)**:
+   * Ensures `Admin`, `Operator`, and `Viewer` groups exist.
+   * When `--ensure-superuser` is active and `DJANGO_SUPERUSER_USERNAME` / `DJANGO_SUPERUSER_PASSWORD` are set, creates the initial superuser in the `Admin` group if absent.
+   * Only when `AUTO_SEED_DEMO_LAB=True` (Dev mode), `--create-demo-users` seeds `admin`, `operator`, and `viewer` (`bgppassword123`) without overwriting existing user credentials.
+4. **Starter Routing Profiles (`seed_default_routing --only-if-empty`)**:
+   * Controlled by `AUTO_SEED_ROUTING` (default `True`). When `PseudoRib` and `Rib` tables are both empty, seeds the starter RFC 7999 IPv4/IPv6 RTBH profiles, Scrubbing Diversion profile, IPv4 Flowspec profile, and `Production Loc-RIB`. Subsequent container restarts never recreate profiles deleted or customized by operators.
+5. **BGP Speaker & Lab Seeding**:
+   * **Production (`bootstrap_bgp_config`)**: Initializes `BgpGlobalConfig` from `BGP_LOCAL_AS`, `BGP_ROUTER_ID`, and `BGP_LISTEN_PORT` if empty, and writes `/configs/gobgp.yaml` into the shared `gobgp_config` volume before `gobgpd` starts.
+   * **Developer Lab (`seed_dev_lab`, when `AUTO_SEED_DEMO_LAB=True`)**: Additionally seeds the 3 simulated BIRD peers (`10.100.0.20` eBGP AS 65001, `10.100.0.30` & `10.100.0.40` iBGP AS 65000) if `BgpPeerConfig` is empty.
+
+### 9.2 Layered Compose Architecture (Developer vs. Production)
+* **`docker-compose.yml` (Shared Core)**: Defines `db` (PostgreSQL 16), `backend`, `peer-syncer` (`run_peer_syncer`), `gobgp`, and `frontend`, plus named volumes (`pgdata`, `gobgp_config`, `django_static`).
+* **`docker-compose.dev.yml` (`make dev-up`)**: Enables `config.settings.development`, live bind-mounts (`./backend:/app`, `./web:/app`), Vite HMR (`5173`), debug ports (`8000`, `5678`, `5432`, `50051`), `AUTO_SEED_DEMO_LAB=True`, `VITE_DEMO_MODE=true`, and adds the 3 BIRD 3 containers (`bird`, `bird-ibgp1`, `bird-ibgp2`) on `10.100.0.0/24`.
+* **`docker-compose.prod.yml` (`make prod-up`)**: Enables `config.settings.production` (`DEBUG=False`), Gunicorn workers, `COLLECT_STATIC=True`, unprivileged Nginx serving compiled SPA assets and reverse-proxying `/api/`, `/admin/`, and `/static/` on `GABU_HTTP_PORT` (default `8080`), GoBGP listening on `GABU_BGP_PORT` (default `179`), `AUTO_SEED_DEMO_LAB=False`, and hides demo login helpers (`VITE_DEMO_MODE=false`).

@@ -1,0 +1,101 @@
+# ==============================================================================
+# Gabu — Developer & Multi-Peer Lab Overlay
+# Usage: make dev-up
+# Adds live code reload, debug ports, demo accounts, and 3x simulated BIRD peers.
+# ==============================================================================
+
+services:
+  db:
+    ports:
+      - "${POSTGRES_HOST_PORT:-5432}:5432"
+
+  backend:
+    command: python manage.py runserver 0.0.0.0:8000
+    volumes:
+      - ./backend:/app
+    ports:
+      - "8000:8000"
+      - "5678:5678"
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DJANGO_DEBUG: "True"
+      ENABLE_DEBUGPY: "True"
+      AUTO_SEED_DEMO_LAB: "True"
+      COLLECT_STATIC: "False"
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://127.0.0.1:5173,http://localhost:8000
+
+  peer-syncer:
+    volumes:
+      - ./backend:/app
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.development
+      DJANGO_DEBUG: "True"
+
+  frontend:
+    build:
+      target: development
+    volumes:
+      - ./web:/app
+      - /app/node_modules
+    ports:
+      - "5173:5173"
+    environment:
+      VITE_API_URL: http://backend:8000
+      VITE_DEMO_MODE: "true"
+
+  gobgp:
+    ports:
+      - "50051:50051"
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.10
+
+  bird:
+    build:
+      context: .
+      dockerfile: deploy/docker/bird.Dockerfile
+    container_name: bgpweb-bird
+    restart: unless-stopped
+    volumes:
+      - ./configs/bird-ebgp.conf:/etc/bird.conf:ro
+    depends_on:
+      - gobgp
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.20
+
+  bird-ibgp1:
+    build:
+      context: .
+      dockerfile: deploy/docker/bird.Dockerfile
+    container_name: bgpweb-bird-ibgp1
+    restart: unless-stopped
+    volumes:
+      - ./configs/bird-ibgp1.conf:/etc/bird.conf:ro
+    depends_on:
+      - gobgp
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.30
+
+  bird-ibgp2:
+    build:
+      context: .
+      dockerfile: deploy/docker/bird.Dockerfile
+    container_name: bgpweb-bird-ibgp2
+    restart: unless-stopped
+    volumes:
+      - ./configs/bird-ibgp2.conf:/etc/bird.conf:ro
+    depends_on:
+      - gobgp
+    networks:
+      bgpnet:
+        ipv4_address: 10.100.0.40
+
+networks:
+  bgpnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 10.100.0.0/24

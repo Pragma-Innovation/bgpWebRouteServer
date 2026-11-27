@@ -2,10 +2,11 @@ from .base import *
 
 DEBUG = False
 
-# Security settings for production behind TLS/Ingress
+# Security settings for production (set DJANGO_SECURE_COOKIES=True when behind HTTPS/TLS)
 SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
-SESSION_COOKIE_SECURE = True
-CSRF_COOKIE_SECURE = True
+SESSION_COOKIE_SECURE = env.bool('DJANGO_SECURE_COOKIES', default=False)
+CSRF_COOKIE_SECURE = env.bool('DJANGO_SECURE_COOKIES', default=False)
+CSRF_TRUSTED_ORIGINS = env.list('CSRF_TRUSTED_ORIGINS', default=[])
 SECURE_BROWSER_XSS_FILTER = True
 SECURE_CONTENT_TYPE_NOSNIFF = True
 X_FRAME_OPTIONS = 'DENY'

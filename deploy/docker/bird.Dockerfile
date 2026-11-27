@@ -1,4 +1,4 @@
-FROM alpine:latest
+FROM docker.io/library/alpine:latest
 
 # Install BIRD Internet Routing Daemon (BIRD 3 with native Flowspec)
 RUN apk add --no-cache bird

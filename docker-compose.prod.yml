@@ -1,0 +1,56 @@
+# ==============================================================================
+# Gabu — Hardened Production Overlay
+# Usage:
+#   1. cp .env.prod.example .env   # Configure secrets, initial Admin, and ASN
+#   2. make prod-up
+#
+# Runs only the 5 core production services (Nginx + Gunicorn + Postgres + GoBGP + Syncer).
+# No source code bind-mounts, no debug servers, no test BIRD routers, no demo users.
+# ==============================================================================
+
+services:
+  db:
+    restart: always
+
+  backend:
+    restart: always
+    command: >
+      gunicorn config.wsgi:application
+      --bind 0.0.0.0:8000
+      --workers ${GUNICORN_WORKERS:-3}
+      --access-logfile -
+      --error-logfile -
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DJANGO_DEBUG: "False"
+      ENABLE_DEBUGPY: "False"
+      AUTO_SEED_DEMO_LAB: "False"
+      AUTO_SEED_ROUTING: ${AUTO_SEED_ROUTING:-True}
+      COLLECT_STATIC: "True"
+      DJANGO_SECURE_COOKIES: ${DJANGO_SECURE_COOKIES:-False}
+      CSRF_TRUSTED_ORIGINS: ${CSRF_TRUSTED_ORIGINS:-http://localhost:8080}
+
+  peer-syncer:
+    restart: always
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings.production
+      DJANGO_DEBUG: "False"
+
+  gobgp:
+    restart: always
+    # Exposes BGP TCP port 179 so external physical/virtual routers can peer with Gabu.
+    # Tip: For direct single-hop eBGP or TCP MD5 across host NICs, you may alternatively
+    # set `network_mode: host` on gobgp and set GOBGP_GRPC_HOST=host.docker.internal.
+    ports:
+      - "${GABU_BGP_PORT:-179}:179"
+
+  frontend:
+    restart: always
+    build:
+      target: production
+      args:
+        VITE_DEMO_MODE: "false"
+    volumes:
+      - django_static:/usr/share/nginx/django_static:ro
+    ports:
+      - "${GABU_HTTP_PORT:-8080}:8080"

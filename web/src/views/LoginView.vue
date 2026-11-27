@@ -14,6 +14,9 @@ const password = ref('')
 const showPassword = ref(false)
 const errorMessage = ref<string | null>(null)
 const isSubmitting = ref(false)
+const showDemoHelpers = Boolean(
+  import.meta.env.DEV || import.meta.env.VITE_DEMO_MODE === 'true'
+)
 
 async function handleLogin() {
   if (!username.value.trim() || !password.value) {
@@ -108,11 +111,11 @@ function fillDemoAccount(u: string, p: string) {
         </button>
       </form>
 
-      <!-- Quick demo accounts helper -->
-      <div class="demo-helpers">
+      <!-- Quick demo accounts helper (Development / Demo mode only) -->
+      <div v-if="showDemoHelpers" class="demo-helpers">
         <div class="demo-title">
           <ShieldCheck :size="14" />
-          <span>Role-Based Access Control</span>
+          <span>Dev Lab Quick Sign-In</span>
         </div>
         <div class="demo-chips">
           <button

@@ -164,63 +164,91 @@ To prevent accidental route injection and maintain strict operational control ov
 
 ---
 
-## Quickstart & Local Lab
+## Installation & Quickstart (Developer vs. Production)
+
+Gabu uses layered Compose configurations (`docker-compose.yml` + `docker-compose.dev.yml` or `docker-compose.prod.yml`) and an automated container entrypoint (`backend/entrypoint.sh`) that initializes the database schema, RBAC roles, and starter profiles automatically on first boot. Both **Docker Compose** and **Podman (`podman-compose`)** are auto-detected by the `Makefile`.
 
 ### Prerequisites
 * [Docker](https://docs.docker.com/get-docker/) & Docker Compose **or** [Podman](https://podman.io/) (with `podman-compose`).
-* Python 3.10+ (for local test runner scripts).
+* Python 3.10+ (optional, for running the host-side integration test script).
 
-### 1. Start the Complete Stack
+---
+
+### Option A: Developer & Multi-Peer Lab Installation (1 Command)
+Starts all **8 containers** (`db`, `backend` with live reload, `peer-syncer`, `frontend` Vite HMR, `gobgp`, and **3 simulated BIRD 3 routers**: 1x eBGP + 2x iBGP) and automatically migrates PostgreSQL, seeds demo accounts, starter Pseudo-RIB profiles, and the 3 lab BGP sessions:
+
 ```bash
 git clone https://github.com/Pragma-Innovation/bgpWebRouteServer.git
 cd bgpWebRouteServer
 
-# Build and start all 7 containers (DB, Backend, Frontend, GoBGP, 3x BIRD)
-make lab-up
+# Build, initialize DB & seeds, and start the full multi-peer lab
+make dev-up
 ```
 
-### 2. Access the Applications
-| Service | URL | Default Credentials | Description |
+#### Developer Lab Endpoints & Demo Accounts
+| Service | URL / Endpoint | Default Credentials | Description |
 |---|---|---|---|
-| **Web UI** | `http://localhost:5173` | `operator` / `operator123` | Single Page Application dashboard |
-| **Django API** | `http://localhost:8000/api/v1/` | JWT or Session auth | REST API root |
-| **Django Admin** | `http://localhost:8000/admin/` | `admin` / `admin123` | System management & users |
-| **GoBGP gRPC** | `localhost:50051` | Open | GoBGP management API |
-| **eBGP Peering** | `10.100.0.10` $\leftrightarrow$ `10.100.0.20` | Port 179 | GoBGP (AS 65000) $\leftrightarrow$ BIRD eBGP (AS 65001) |
-| **iBGP Peering 1**| `10.100.0.10` $\leftrightarrow$ `10.100.0.30` | Port 179 | GoBGP (AS 65000) $\leftrightarrow$ BIRD iBGP Core 1 (AS 65000) |
-| **iBGP Peering 2**| `10.100.0.10` $\leftrightarrow$ `10.100.0.40` | Port 179 | GoBGP (AS 65000) $\leftrightarrow$ BIRD iBGP Core 2 (AS 65000) |
+| **Web UI (Vite HMR)** | `http://localhost:5173` | `operator` / `bgppassword123` | Single Page Application (Dev mode) |
+| **Django REST API** | `http://localhost:8000/api/v1/` | JWT or Session auth | REST API root |
+| **Django Admin** | `http://localhost:8000/admin/` | `admin` / `bgppassword123` | System & user administration |
+| **GoBGP gRPC** | `localhost:50051` | Internal / Lab | GoBGP management API |
+| **eBGP Peering** | `10.100.0.10` ↔ `10.100.0.20` | TCP 179 | GoBGP (AS 65000) ↔ BIRD eBGP (AS 65001) |
+| **iBGP Peering 1** | `10.100.0.10` ↔ `10.100.0.30` | TCP 179 | GoBGP (AS 65000) ↔ BIRD iBGP Core 1 (AS 65000) |
+| **iBGP Peering 2** | `10.100.0.10` ↔ `10.100.0.40` | TCP 179 | GoBGP (AS 65000) ↔ BIRD iBGP Core 2 (AS 65000) |
 
-### Role-Based Access Control (RBAC)
-The application includes three pre-configured roles:
-* **Admin** (`admin` / `admin123`): Full administrative rights, user management, and BGP engine settings.
-* **Operator** (`operator` / `operator123`): Create/edit prefixes, manage Flowspec rules, configure Pseudo-RIBs, push Master RIB to GoBGP.
-* **Viewer** (`viewer` / `viewer123`): Read-only monitoring of inventory, announcements, and peer states.
+#### Pre-Seeded Dev Lab RBAC Accounts
+* **Admin** (`admin` / `bgppassword123`): Full administrative rights, user management, and BGP peer/router settings.
+* **Operator** (`operator` / `bgppassword123`): Create/edit prefixes, manage Flowspec rules, configure Pseudo-RIBs, push Master RIB to GoBGP.
+* **Viewer** (`viewer` / `bgppassword123`): Read-only monitoring of inventory, announcements, and peer states.
+
+---
+
+### Option B: Production Installation
+Starts only the **5 hardened production services**:
+1. **`frontend` (Unprivileged Nginx):** Serves the compiled Vue 3 static bundle and reverse-proxies `/api/` and `/admin/` to Gunicorn on a single port (`8080` by default, configurable via `GABU_HTTP_PORT`). Demo quick-login chips are stripped from the production build.
+2. **`backend` (Gunicorn, non-root `appuser`):** Runs with `DEBUG=False`, migrates PostgreSQL automatically, bootstraps RBAC roles (`Admin`, `Operator`, `Viewer`), creates your initial `Admin` superuser from `.env`, initializes your Local ASN & Router ID, and seeds only the starter RTBH/Flowspec Pseudo-RIB templates on an empty database (no demo accounts, no lab BIRD peers).
+3. **`peer-syncer`:** Background reconciliation daemon keeping PostgreSQL peer configurations and GoBGP synchronized.
+4. **`gobgp`:** Production BGP speaker exposing TCP port `179` (`GABU_BGP_PORT`) to peer with your physical or virtual backbone routers.
+5. **`db` (PostgreSQL 16):** Persistent relational database isolated on the internal container network.
+
+```bash
+git clone https://github.com/Pragma-Innovation/bgpWebRouteServer.git
+cd bgpWebRouteServer
+
+# 1. Prepare your production environment configuration
+cp .env.prod.example .env
+# Edit .env: set DJANGO_SECRET_KEY, POSTGRES_PASSWORD, DJANGO_SUPERUSER_PASSWORD,
+# DJANGO_ALLOWED_HOSTS, BGP_LOCAL_AS, and BGP_ROUTER_ID.
+
+# 2. Build and start the hardened production stack
+make prod-up
+```
+Access Gabu at `http://<server-ip>:8080` (or port `80` if `GABU_HTTP_PORT=80` / behind TLS Ingress) and sign in with your configured `DJANGO_SUPERUSER_USERNAME`.
 
 ---
 
 ## Operational Commands (`Makefile`)
 
-The repository includes a comprehensive `Makefile` to streamline development, testing, and operations:
-
 ```bash
-# Run unit & contract test suite
-make test
+# Developer & Lab lifecycle
+make dev-up            # Start Dev + 3x BIRD Lab stack (auto-migrates & seeds lab)
+make dev-down          # Stop Dev + Lab stack
+make seed-dev          # Manually re-seed demo accounts & 3 BIRD lab peers
 
-# Run automated end-to-end eBGP Flowspec & RTBH propagation test
-make test-integration
+# Production lifecycle
+make prod-up           # Start hardened 5-service Production stack
+make prod-down         # Stop Production stack
+make init-db           # Manually run migrations, RBAC bootstrap, and starter profile seed
 
-# Check BGP peering session status between GoBGP and BIRD 3
-make lab-status
+# Testing & BGP Lab Diagnostics
+make test-backend      # Run full Django unit test suite inside backend container
+make test-integration  # Run end-to-end Flowspec & RTBH propagation test across 3 BIRD routers
+make lab-status        # Check BGP session status across GoBGP and all 3 BIRD routers
+make bird-unicast      # Inspect BIRD 3 Unicast RTBH tables
+make bird-routes       # Inspect BIRD 3 Flowspec tables
 
-# Inspect routes received in BIRD 3 Unicast and Flowspec tables
-make bird-unicast
-make bird-routes
-
-# Validate Kubernetes manifests via Kustomize
-make k8s-validate
-
-# Tear down the local lab
-make lab-down
+# Kubernetes
+make k8s-validate      # Validate Kubernetes manifests & overlays via Kustomize
 ```
 
 ---
@@ -229,7 +257,7 @@ make lab-down
 
 * **[`SPECS.md`](file:///home/mtexier/projects/bgpWebRouteServer/SPECS.md)**: Exhaustive functional and technical specifications, data models, RFC compliance contracts, and API reference.
 * **[`AGENTS.md`](file:///home/mtexier/projects/bgpWebRouteServer/AGENTS.md)**: Development guidelines, coding conventions, architectural invariants, and workflow instructions for AI agents.
-* **[`docker-compose.yml`](file:///home/mtexier/projects/bgpWebRouteServer/docker-compose.yml)**: Local container orchestration topology.
+* **[`docker-compose.yml`](file:///home/mtexier/projects/bgpWebRouteServer/docker-compose.yml)** / **[`docker-compose.dev.yml`](file:///home/mtexier/projects/bgpWebRouteServer/docker-compose.dev.yml)** / **[`docker-compose.prod.yml`](file:///home/mtexier/projects/bgpWebRouteServer/docker-compose.prod.yml)**: Layered container orchestration topologies.
 * **[`deploy/k8s/`](file:///home/mtexier/projects/bgpWebRouteServer/deploy/k8s/)**: Production-ready Kubernetes manifests with Kustomize overlays (`dev` / `prod`).
 
 ---

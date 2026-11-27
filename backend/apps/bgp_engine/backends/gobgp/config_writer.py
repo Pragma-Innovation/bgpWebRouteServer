@@ -132,7 +132,14 @@ class GoBgpConfigWriter:
     @classmethod
     def sync_to_file(cls, target_path: Optional[str] = None) -> bool:
         """Write the generated configuration to disk."""
-        paths = [target_path] if target_path else cls.TARGET_PATHS
+        if target_path:
+            paths = [target_path]
+        elif os.environ.get("GOBGP_CONFIG_PATH"):
+            paths = [os.environ["GOBGP_CONFIG_PATH"]]
+        elif os.path.isdir("/configs"):
+            paths = ["/configs/gobgp.yaml"]
+        else:
+            paths = cls.TARGET_PATHS
         data = cls.generate_config_dict()
 
         try:

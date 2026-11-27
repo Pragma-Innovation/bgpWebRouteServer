@@ -3,9 +3,21 @@ from apps.routing.models import PseudoRib, BgpCommunity, Rib
 
 
 class Command(BaseCommand):
-    help = 'Seeds default Pseudo-RIB policy profiles and Master Loc-RIB'
+    help = 'Seeds default starter Pseudo-RIB policy profiles and Master Loc-RIB'
+
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--only-if-empty',
+            action='store_true',
+            default=False,
+            help='Only seed starter profiles if no Pseudo-RIBs or Master RIBs exist in the database yet.'
+        )
 
     def handle(self, *args, **options):
+        if options['only_if_empty'] and (PseudoRib.objects.exists() or Rib.objects.exists()):
+            self.stdout.write("Routing profiles already present in database — skipping starter profile seed.")
+            return
+
         # 1. IPv4 RTBH Blackhole
         rib_v4, created = PseudoRib.objects.get_or_create(
             name='RTBH Backbone Blackhole (IPv4)',
@@ -88,7 +100,7 @@ class Command(BaseCommand):
             self.stdout.write(f"'{rib_flow.name}' already exists.")
 
         # 5. Master Named RIB: Production Loc-RIB
-        master_rib, created = Rib.objects.get_or_create(
+        master_rib, master_created = Rib.objects.get_or_create(
             name='Production Loc-RIB',
             defaults={
                 'description': 'Master BGP Loc-RIB aggregating IPv4/IPv6 Unicast RTBH and Flowspec mitigations',
@@ -96,5 +108,10 @@ class Command(BaseCommand):
                 'status': Rib.STATUS_DRAFT,
             }
         )
-        master_rib.pseudo_ribs.add(rib_v4, rib_v6, rib_flow)
-        self.stdout.write(self.style.SUCCESS(f"Master RIB '{master_rib.name}' initialized with {master_rib.pseudo_ribs.count()} Pseudo-RIBs."))
+        if master_created:
+            master_rib.pseudo_ribs.add(rib_v4, rib_v6, rib_flow)
+            self.stdout.write(self.style.SUCCESS(
+                f"Master RIB '{master_rib.name}' initialized with {master_rib.pseudo_ribs.count()} starter Pseudo-RIBs."
+            ))
+        else:
+            self.stdout.write(f"Master RIB '{master_rib.name}' already exists.")
